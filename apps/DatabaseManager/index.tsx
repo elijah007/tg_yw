@@ -3,7 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { 
   LayoutDashboard, Database, Shield, Activity, Settings, 
   Search, Plus, RefreshCw, Trash2, CheckCircle, XCircle, 
-  Database as DbIcon, ShieldCheck, AlertTriangle, Play
+  Database as DbIcon, ShieldCheck, AlertTriangle, Play, X
 } from 'lucide-react';
 import { DataSource, SensitiveRule, InspectionRecord, DatabaseType } from '../../types';
 import { INITIAL_DATA_SOURCES, INITIAL_RULES } from '../../constants';
@@ -14,7 +14,9 @@ const DatabaseManager: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'dashboard' | 'sources' | 'sensitive' | 'inspection' | 'profile'>('dashboard');
   const [sources, setSources] = useState<DataSource[]>(INITIAL_DATA_SOURCES);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [editingSource, setEditingSource] = useState<DataSource | null>(null);
+  const [sourceToDelete, setSourceToDelete] = useState<string | null>(null);
   const [testResult, setTestResult] = useState<Record<string, 'success' | 'error' | 'loading' | null>>({});
 
   const handleTestConnection = async (id: string) => {
@@ -25,9 +27,11 @@ const DatabaseManager: React.FC = () => {
     setTestResult(prev => ({ ...prev, [id]: success ? 'success' : 'error' }));
   };
 
-  const handleDeleteSource = (id: string) => {
-    if (confirm('确定要删除此数据源吗？此操作不可恢复。')) {
-      setSources(sources.filter(s => s.id !== id));
+  const confirmDelete = () => {
+    if (sourceToDelete) {
+      setSources(prev => prev.filter(s => s.id !== sourceToDelete));
+      setSourceToDelete(null);
+      setIsDeleteModalOpen(false);
     }
   };
 
@@ -244,7 +248,7 @@ const DatabaseManager: React.FC = () => {
                           <Settings className="w-4 h-4" />
                         </button>
                         <button 
-                          onClick={() => handleDeleteSource(source.id)}
+                          onClick={() => { setSourceToDelete(source.id); setIsDeleteModalOpen(true); }}
                           title="删除"
                           className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
                         >
@@ -255,10 +259,19 @@ const DatabaseManager: React.FC = () => {
                   ))}
                 </tbody>
               </table>
+              {sources.length === 0 && (
+                <div className="p-20 text-center">
+                  <div className="w-20 h-20 bg-slate-100 rounded-full flex items-center justify-center mx-auto mb-4 text-slate-300">
+                    <DbIcon className="w-10 h-10" />
+                  </div>
+                  <p className="text-slate-500">暂无配置数据源</p>
+                </div>
+              )}
             </div>
           </div>
         )}
 
+        {/* ... (sensitive, inspection, profile 保持不变) */}
         {activeTab === 'sensitive' && (
            <div className="space-y-6 animate-in slide-in-from-right-4 duration-500">
              <div className="flex justify-between items-center">
@@ -403,19 +416,47 @@ const DatabaseManager: React.FC = () => {
         )}
       </div>
 
+      {/* 数据源新增/编辑模态框 */}
       {isModalOpen && (
         <DataSourceModal 
           source={editingSource} 
           onClose={() => setIsModalOpen(false)}
           onSave={(data) => {
             if (editingSource) {
-              setSources(sources.map(s => s.id === editingSource.id ? { ...s, ...data } : s));
+              setSources(prev => prev.map(s => s.id === editingSource.id ? { ...s, ...data } : s));
             } else {
-              setSources([...sources, { ...data, id: Date.now().toString(), status: 'online' } as any]);
+              setSources(prev => [...prev, { ...data, id: Date.now().toString(), status: 'online' } as any]);
             }
             setIsModalOpen(false);
           }}
         />
+      )}
+
+      {/* 自定义删除确认模态框 */}
+      {isDeleteModalOpen && (
+        <div className="fixed inset-0 z-[110] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-white w-full max-w-sm rounded-2xl shadow-2xl p-6 text-center animate-in zoom-in-95 duration-200">
+            <div className="w-16 h-16 bg-red-50 text-red-500 rounded-full flex items-center justify-center mx-auto mb-4">
+              <AlertTriangle className="w-8 h-8" />
+            </div>
+            <h3 className="text-xl font-bold text-slate-800 mb-2">确认删除数据源？</h3>
+            <p className="text-slate-500 mb-6 text-sm">此操作将移除该 JDBC 连接配置且不可恢复。相关的扫描记录将保留但在管理列表中不可见。</p>
+            <div className="grid grid-cols-2 gap-3">
+              <button 
+                onClick={() => { setIsDeleteModalOpen(false); setSourceToDelete(null); }}
+                className="px-4 py-3 bg-slate-100 text-slate-600 rounded-xl font-bold hover:bg-slate-200 transition-colors"
+              >
+                取消
+              </button>
+              <button 
+                onClick={confirmDelete}
+                className="px-4 py-3 bg-red-600 text-white rounded-xl font-bold shadow-lg shadow-red-100 hover:bg-red-700 active:scale-95 transition-all"
+              >
+                确定删除
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
