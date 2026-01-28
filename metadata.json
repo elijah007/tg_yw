@@ -1,0 +1,5 @@
+{
+  "name": "天工综合运维管理平台 (Tiangong O&M Platform)",
+  "description": "一个综合性的大型运维管理平台，集成了多应用管理、公告系统以及强大的数据库管理功能，支持敏感数据扫描与日常巡检。",
+  "requestFramePermissions": []
+}
