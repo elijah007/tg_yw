@@ -3,12 +3,13 @@ import React, { useState, useEffect } from 'react';
 import { 
   LayoutDashboard, Database, Shield, Activity, Settings, 
   Search, Plus, RefreshCw, Trash2, CheckCircle, XCircle, 
-  Database as DbIcon, ShieldCheck, AlertTriangle, Play, X
+  Database as DbIcon, ShieldCheck, AlertTriangle, Play, X,
+  ArrowUpRight, BarChart3, HardDrive, Layers
 } from 'lucide-react';
 import { DataSource, SensitiveRule, InspectionRecord, DatabaseType } from '../../types';
 import { INITIAL_DATA_SOURCES, INITIAL_RULES } from '../../constants';
 import DataSourceModal from './DataSourceModal';
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area } from 'recharts';
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area, BarChart, Bar } from 'recharts';
 
 const DatabaseManager: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'dashboard' | 'sources' | 'sensitive' | 'inspection' | 'profile'>('dashboard');
@@ -21,7 +22,6 @@ const DatabaseManager: React.FC = () => {
 
   const handleTestConnection = async (id: string) => {
     setTestResult(prev => ({ ...prev, [id]: 'loading' }));
-    // Mocking JDBC connection delay
     await new Promise(resolve => setTimeout(resolve, 1500));
     const success = Math.random() > 0.2;
     setTestResult(prev => ({ ...prev, [id]: success ? 'success' : 'error' }));
@@ -42,6 +42,23 @@ const DatabaseManager: React.FC = () => {
     { time: '12:00', load: 60, connections: 250 },
     { time: '16:00', load: 55, connections: 210 },
     { time: '20:00', load: 30, connections: 95 },
+  ];
+
+  const incrementData = [
+    { date: '10-20', inc: 2.4 },
+    { date: '10-21', inc: 3.1 },
+    { date: '10-22', inc: 4.8 },
+    { date: '10-23', inc: 4.2 },
+    { date: '10-24', inc: 5.5 },
+    { date: '10-25', inc: 4.9 },
+    { date: '今日', inc: 6.2 },
+  ];
+
+  const largeTables = [
+    { name: 'order_details', db: 'order_db', rows: '4.2亿', size: '124.5 GB', type: 'MySQL', risk: 'high' },
+    { name: 'user_action_logs', db: 'logs', rows: '12亿', size: '89.2 GB', type: 'Mongo', risk: 'medium' },
+    { name: 'audit_trail', db: 'core_db', rows: '1.5亿', size: '45.1 GB', type: 'PG', risk: 'low' },
+    { name: 'billing_snapshot', db: 'finance', rows: '8,400万', size: '32.8 GB', type: 'MySQL', risk: 'low' },
   ];
 
   return (
@@ -93,8 +110,9 @@ const DatabaseManager: React.FC = () => {
       {/* Content Area */}
       <div className="flex-1 p-8 bg-slate-50 overflow-y-auto">
         {activeTab === 'dashboard' && (
+          /* Dashboard 保持不变，仅更新统计数据关联 */
           <div className="space-y-8 animate-in fade-in duration-500">
-            <div className="flex items-center justify-between">
+             <div className="flex items-center justify-between">
               <div>
                 <h2 className="text-2xl font-bold text-slate-800">数据库运行概览</h2>
                 <p className="text-slate-500">实时监控集群状态与安全指标</p>
@@ -259,20 +277,12 @@ const DatabaseManager: React.FC = () => {
                   ))}
                 </tbody>
               </table>
-              {sources.length === 0 && (
-                <div className="p-20 text-center">
-                  <div className="w-20 h-20 bg-slate-100 rounded-full flex items-center justify-center mx-auto mb-4 text-slate-300">
-                    <DbIcon className="w-10 h-10" />
-                  </div>
-                  <p className="text-slate-500">暂无配置数据源</p>
-                </div>
-              )}
             </div>
           </div>
         )}
 
-        {/* ... (sensitive, inspection, profile 保持不变) */}
         {activeTab === 'sensitive' && (
+           /* 保持现状 */
            <div className="space-y-6 animate-in slide-in-from-right-4 duration-500">
              <div className="flex justify-between items-center">
                 <div>
@@ -338,36 +348,128 @@ const DatabaseManager: React.FC = () => {
 
         {activeTab === 'inspection' && (
            <div className="space-y-6 animate-in zoom-in-95 duration-500">
-             <div className="flex justify-between items-center">
+             <div className="flex justify-between items-end">
                 <div>
-                  <h2 className="text-2xl font-bold text-slate-800">自动巡检报告</h2>
-                  <p className="text-slate-500">包含：备份、主从同步、高可用VIP、性能健康度</p>
+                  <h2 className="text-2xl font-bold text-slate-800">自动巡检报表</h2>
+                  <p className="text-slate-500">包含物理空间、备份有效性及增量分析报告</p>
                 </div>
-                <button className="bg-slate-800 text-white px-4 py-2 rounded-xl flex items-center">
-                   一键全量巡检
-                </button>
+                <div className="flex space-x-2">
+                  <button className="bg-white border border-slate-200 text-slate-600 px-4 py-2 rounded-xl text-sm font-semibold flex items-center hover:bg-slate-50">
+                     <BarChart3 className="w-4 h-4 mr-2" /> 历史周报
+                  </button>
+                  <button className="bg-blue-600 text-white px-4 py-2 rounded-xl text-sm font-semibold flex items-center shadow-lg shadow-blue-100 hover:bg-blue-700 transition-all">
+                     <RefreshCw className="w-4 h-4 mr-2" /> 立即重新巡检
+                  </button>
+                </div>
              </div>
 
-             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+             {/* 摘要信息 */}
+             <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                 {[
-                  { title: '备份检查', status: 'success', desc: '所有实例 24h 内备份点有效' },
-                  { title: '主从同步', status: 'warning', desc: '分析库-PG-02 同步延迟 120s' },
-                  { title: '高可用状态', status: 'success', desc: 'VIP 资源组运行正常' },
-                  { title: 'VIP 接入点', status: 'error', desc: '192.168.1.150 端口连通性波动' },
+                  { title: '备份检查', status: 'success', icon: <CheckCircle />, color: 'text-emerald-500', bg: 'bg-emerald-50' },
+                  { title: '主从同步', status: 'warning', icon: <AlertTriangle />, color: 'text-amber-500', bg: 'bg-amber-50' },
+                  { title: '数据增量', status: 'normal', icon: <ArrowUpRight />, color: 'text-blue-500', bg: 'bg-blue-50', extra: '+6.2 GB' },
+                  { title: '大表隐患', status: 'danger', icon: <HardDrive />, color: 'text-red-500', bg: 'bg-red-50', extra: '1个高危' },
                 ].map((item, i) => (
-                   <div key={i} className="bg-white p-5 rounded-2xl border border-slate-200 flex items-center justify-between">
-                      <div className="flex items-center space-x-4">
-                        <div className={`p-3 rounded-xl ${item.status === 'success' ? 'bg-emerald-50 text-emerald-600' : item.status === 'warning' ? 'bg-amber-50 text-amber-600' : 'bg-red-50 text-red-600'}`}>
-                           <CheckCircle className="w-6 h-6" />
-                        </div>
-                        <div>
-                           <h4 className="font-bold text-slate-800">{item.title}</h4>
-                           <p className="text-sm text-slate-500">{item.desc}</p>
-                        </div>
+                   <div key={i} className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm flex items-center space-x-3">
+                      <div className={`p-2 rounded-lg ${item.bg} ${item.color}`}>
+                        {item.icon}
                       </div>
-                      <button className="text-xs font-bold text-blue-600 uppercase tracking-widest hover:underline">详情</button>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-xs text-slate-400 font-bold uppercase">{item.title}</p>
+                        <p className="text-sm font-bold text-slate-800 truncate">{item.extra || '状态正常'}</p>
+                      </div>
                    </div>
                 ))}
+             </div>
+
+             {/* 增量分析 & 大表详情 */}
+             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                {/* 每日增量图表 */}
+                <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
+                   <div className="flex items-center justify-between mb-6">
+                      <h3 className="font-bold text-slate-800 flex items-center">
+                        <Layers className="w-5 h-5 mr-2 text-blue-500" />
+                        全网数据增量分析
+                      </h3>
+                      <span className="text-xs text-slate-400">最近 7 天</span>
+                   </div>
+                   <div className="h-48 mb-4">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <BarChart data={incrementData}>
+                          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                          <XAxis dataKey="date" stroke="#94a3b8" fontSize={11} axisLine={false} tickLine={false} />
+                          <YAxis stroke="#94a3b8" fontSize={11} axisLine={false} tickLine={false} />
+                          <Tooltip 
+                            cursor={{ fill: '#f8fafc' }}
+                            contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}
+                          />
+                          <Bar dataKey="inc" fill="#3b82f6" radius={[4, 4, 0, 0]} barSize={20} />
+                        </BarChart>
+                      </ResponsiveContainer>
+                   </div>
+                   <div className="pt-4 border-t border-slate-50 flex justify-between items-center text-sm">
+                      <span className="text-slate-500">今日预计增量</span>
+                      <span className="font-bold text-blue-600">+6.2 GB</span>
+                   </div>
+                </div>
+
+                {/* 大表检查报告 */}
+                <div className="lg:col-span-2 bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+                   <div className="px-6 py-4 bg-slate-50/50 border-b border-slate-100 flex justify-between items-center">
+                      <h3 className="font-bold text-slate-800 flex items-center">
+                        <HardDrive className="w-5 h-5 mr-2 text-red-500" />
+                        Top 大表治理清单
+                      </h3>
+                      <span className="px-2 py-1 bg-red-100 text-red-600 text-[10px] font-bold rounded uppercase">已检出 42 个风险点</span>
+                   </div>
+                   <div className="overflow-x-auto">
+                      <table className="w-full text-left">
+                        <thead className="bg-slate-50 text-xs font-bold text-slate-400 uppercase tracking-widest border-b border-slate-100">
+                          <tr>
+                            <th className="px-6 py-3">物理表名</th>
+                            <th className="px-6 py-3">数据记录</th>
+                            <th className="px-6 py-3">表尺寸 (Size)</th>
+                            <th className="px-6 py-3 text-right">优化建议</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-50">
+                          {largeTables.map((table, i) => (
+                            <tr key={i} className="hover:bg-slate-50/50 transition-colors">
+                              <td className="px-6 py-4">
+                                <div className="text-sm font-bold text-slate-800">{table.name}</div>
+                                <div className="text-xs text-slate-400">库: {table.db} ({table.type})</div>
+                              </td>
+                              <td className="px-6 py-4 text-sm text-slate-600">{table.rows} 行</td>
+                              <td className="px-6 py-4">
+                                <div className="flex items-center space-x-2">
+                                  <div className="flex-1 h-1.5 w-16 bg-slate-100 rounded-full overflow-hidden">
+                                     <div 
+                                      className={`h-full ${table.risk === 'high' ? 'bg-red-500' : table.risk === 'medium' ? 'bg-amber-500' : 'bg-emerald-500'}`} 
+                                      style={{ width: table.risk === 'high' ? '85%' : table.risk === 'medium' ? '50%' : '30%' }}
+                                     ></div>
+                                  </div>
+                                  <span className="text-sm font-bold text-slate-700">{table.size}</span>
+                                </div>
+                              </td>
+                              <td className="px-6 py-4 text-right">
+                                {table.risk === 'high' ? (
+                                  <button className="text-xs font-bold text-red-600 bg-red-50 px-2 py-1 rounded hover:bg-red-100">建议分区</button>
+                                ) : table.risk === 'medium' ? (
+                                  <button className="text-xs font-bold text-amber-600 bg-amber-50 px-2 py-1 rounded hover:bg-amber-100">历史归档</button>
+                                ) : (
+                                  <span className="text-xs text-slate-400">暂无建议</span>
+                                )}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                   </div>
+                   <div className="p-4 bg-slate-50 text-center">
+                      <button className="text-xs font-bold text-blue-600 hover:underline">查看所有大表 (共 156 个) &rarr;</button>
+                   </div>
+                </div>
              </div>
            </div>
         )}
@@ -416,7 +518,6 @@ const DatabaseManager: React.FC = () => {
         )}
       </div>
 
-      {/* 数据源新增/编辑模态框 */}
       {isModalOpen && (
         <DataSourceModal 
           source={editingSource} 
@@ -432,7 +533,6 @@ const DatabaseManager: React.FC = () => {
         />
       )}
 
-      {/* 自定义删除确认模态框 */}
       {isDeleteModalOpen && (
         <div className="fixed inset-0 z-[110] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200">
           <div className="bg-white w-full max-w-sm rounded-2xl shadow-2xl p-6 text-center animate-in zoom-in-95 duration-200">
