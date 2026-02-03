@@ -1,9 +1,8 @@
+node_modules
+dist
 .git
-.gitignore
 .vscode
 .DS_Store
-dist
 *.md
 Dockerfile
 nginx.conf
-# 注意：这里没有添加 node_modules，因为用户明确要求使用本地的 node_modules
