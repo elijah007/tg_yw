@@ -14,26 +14,37 @@ app.use(cors());
 app.use(bodyParser.json());
 app.use(express.static(path.join(__dirname, 'dist')));
 
-// 数据库连接配置（天工平台元数据库，用于存储数据源信息）
-const dbConfig = {
+// 数据库基础连接配置
+const dbBaseConfig = {
   host: process.env.DB_HOST || 'localhost',
   user: process.env.DB_USER || 'root',
   password: process.env.DB_PASSWORD || '123456',
-  database: process.env.DB_NAME || 'tiangong_db',
   port: parseInt(process.env.DB_PORT || '3306'),
   connectTimeout: 5000
 };
+
+const DB_NAME = process.env.DB_NAME || 'tiangong_db';
 
 let pool = null;
 
 async function initDB() {
   try {
-    pool = mysql.createPool(dbConfig);
-    // 立即尝试连一下确认元数据库配置正确
-    await pool.query('SELECT 1');
-    console.log(`Connected to Tiangong Meta-DB at ${dbConfig.host}`);
-    
-    // 初始化数据表
+    // 步骤1: 先建立一个不带数据库名的临时连接，用来创建库
+    const tempConn = await mysql.createConnection(dbBaseConfig);
+    await tempConn.query(`CREATE DATABASE IF NOT EXISTS ${DB_NAME} CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`);
+    await tempConn.end();
+    console.log(`Database "${DB_NAME}" confirmed/created.`);
+
+    // 步骤2: 初始化正式连接池
+    pool = mysql.createPool({
+      ...dbBaseConfig,
+      database: DB_NAME,
+      waitForConnections: true,
+      connectionLimit: 10,
+      queueLimit: 0
+    });
+
+    // 步骤3: 创建数据源管理表
     await pool.query(`
       CREATE TABLE IF NOT EXISTS data_sources (
         id VARCHAR(50) PRIMARY KEY,
@@ -48,16 +59,21 @@ async function initDB() {
         last_scanned VARCHAR(50)
       )
     `);
+    console.log(`Table "data_sources" ready in ${DB_NAME}.`);
   } catch (err) {
-    console.error('Meta Database initialization failed:', err.message);
+    console.error('CRITICAL: Database initialization failed!');
+    console.error('Error Details:', err.message);
     pool = null;
   }
 }
 
-// 检查元数据库是否就绪
+// 检查元数据库是否就绪的中间件
 const checkDbReady = (req, res, next) => {
   if (!pool) {
-    return res.status(503).json({ success: false, error: '元数据库连接失败，请检查后端 DB_HOST 环境变量。' });
+    return res.status(503).json({ 
+      success: false, 
+      error: '元数据库连接失败。请检查后端 DB_HOST/DB_USER/DB_PASSWORD 是否正确，且 MySQL 服务已启动。' 
+    });
   }
   next();
 };
@@ -87,7 +103,6 @@ app.get('/api/sources', checkDbReady, async (req, res) => {
 app.post('/api/sources', checkDbReady, async (req, res) => {
   const s = req.body;
   try {
-    // 使用 ON DUPLICATE KEY UPDATE 实现“有则改，无则加”
     await pool.query(
       `INSERT INTO data_sources (id, name, type, host, port, database_name, username, password, status, last_scanned) 
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) 
@@ -100,12 +115,10 @@ app.post('/api/sources', checkDbReady, async (req, res) => {
          username = VALUES(username), 
          password = VALUES(password), 
          status = VALUES(status)`,
-      [s.id, s.name, s.type, s.host, s.port, s.database, s.username, s.password, s.status || 'online', s.lastScanned || '']
+      [s.id, s.name, s.type, s.host, s.port, s.database, s.username, s.password || '', s.status || 'online', s.lastScanned || '']
     );
-    console.log(`Data source ${s.id} (${s.name}) saved/updated.`);
-    res.json({ success: true, message: '数据已同步至元数据库' });
+    res.json({ success: true });
   } catch (err) {
-    console.error('Save Source Error:', err.message);
     res.status(500).json({ success: false, error: err.message });
   }
 });
@@ -117,29 +130,40 @@ app.delete('/api/sources/:id', checkDbReady, async (req, res) => {
     if (result.affectedRows === 0) {
       return res.status(404).json({ success: false, error: '记录不存在' });
     }
-    console.log(`Data source ${req.params.id} deleted from database.`);
-    res.json({ success: true, message: '数据库记录已删除' });
+    res.json({ success: true });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }
 });
 
-// API: 真实物理拨测
+// API: 真实物理拨测 (连接目标库)
 app.post('/api/sources/test', async (req, res) => {
   const { type, host, port, username, password, database } = req.body;
-  if (type !== 'mysql') {
-    return res.status(400).json({ success: false, error: '目前仅支持 MySQL 测试' });
+  
+  // 基础参数校验
+  if (!host || !username) {
+    return res.status(400).json({ success: false, error: '主机地址和用户名不能为空' });
   }
+
+  if (type !== 'mysql') {
+    return res.status(400).json({ success: false, error: '当前仅支持对远程 MySQL 实例进行物理拨测' });
+  }
+
   try {
     const conn = await mysql.createConnection({
-      host, port: parseInt(port), user: username, password, database,
+      host, 
+      port: parseInt(port || '3306'), 
+      user: username, 
+      password: password || '', 
+      database: database || undefined,
       connectTimeout: 5000
     });
     await conn.query('SELECT 1');
     await conn.end();
-    res.json({ success: true, message: '物理连接测试成功' });
+    res.json({ success: true, message: '物理连接拨测成功' });
   } catch (err) {
-    res.status(500).json({ success: false, error: err.message });
+    console.error('Test Connection Failed:', err.message);
+    res.status(500).json({ success: false, error: `连接失败: ${err.message}` });
   }
 });
 
