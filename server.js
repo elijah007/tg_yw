@@ -14,13 +14,13 @@ app.use(cors());
 app.use(bodyParser.json());
 app.use(express.static(path.join(__dirname, 'dist')));
 
-// 数据库基础连接配置
+// 数据库基础连接配置 - 默认改为 localhost 方便本地开发
 const dbBaseConfig = {
-  host: process.env.DB_HOST || '192.168.21.60',
+  host: process.env.DB_HOST || '127.0.0.1', 
   user: process.env.DB_USER || 'root',
   password: process.env.DB_PASSWORD || '249gaqLY4pdeHH71T8',
   port: parseInt(process.env.DB_PORT || '3306'),
-  connectTimeout: 5000
+  connectTimeout: 10000 // 增加超时时间
 };
 
 const DB_NAME = process.env.DB_NAME || 'tiangong_db';
@@ -28,11 +28,15 @@ const DB_NAME = process.env.DB_NAME || 'tiangong_db';
 let pool = null;
 
 async function initDB() {
+  console.log(`[DB] 正在尝试连接数据库服务器: ${dbBaseConfig.host}:${dbBaseConfig.port}...`);
   try {
+    // 1. 先建立一个不带数据库名的连接，用于创建数据库
     const tempConn = await mysql.createConnection(dbBaseConfig);
+    console.log(`[DB] 物理连接成功，正在检查/创建数据库: ${DB_NAME}`);
     await tempConn.query(`CREATE DATABASE IF NOT EXISTS ${DB_NAME} CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`);
     await tempConn.end();
 
+    // 2. 创建正式的连接池
     pool = mysql.createPool({
       ...dbBaseConfig,
       database: DB_NAME,
@@ -40,6 +44,8 @@ async function initDB() {
       connectionLimit: 10,
       queueLimit: 0
     });
+
+    console.log(`[DB] 正在初始化数据表结构...`);
 
     // 1. 权限角色表
     await pool.query(`
@@ -89,7 +95,7 @@ async function initDB() {
       )
     `);
 
-    // 5. 数据源管理表 (原有)
+    // 5. 数据源管理表
     await pool.query(`
       CREATE TABLE IF NOT EXISTS data_sources (
         id VARCHAR(50) PRIMARY KEY,
@@ -105,9 +111,10 @@ async function initDB() {
       )
     `);
 
-    // 初始化预置数据 (如果表为空)
+    // 检查并初始化种子数据
     const [roles] = await pool.query('SELECT count(*) as count FROM roles');
     if (roles[0].count === 0) {
+      console.log(`[DB] 检测到空库，正在植入预置元数据...`);
       await pool.query("INSERT INTO roles (name, description) VALUES ('admin', '超级管理员'), ('ops', '运维工程师'), ('viewer', '只读用户')");
       await pool.query("INSERT INTO users (username, password, real_name, role_id) VALUES ('Admin', 'admin123', '高级运维专家-王工', 1)");
       
@@ -121,26 +128,31 @@ async function initDB() {
 
       await pool.query(`
         INSERT INTO announcements (title, content, app_context, priority) VALUES 
-        ('元数据库初始化成功', '天工平台核心元数据存储已成功挂载。', '门户', 'medium'),
+        ('元数据库初始化成功', '天工平台核心元数据存储已成功挂载，所有子应用已就绪。', '门户', 'medium'),
         ('紧急安全补丁通知', '请所有 DBA 在本周五前完成生产库的 SSL 证书更新。', '数据库管理平台', 'high')
       `);
     }
 
-    console.log('Tiangong O&M Meta-database initialized successfully.');
+    console.log('[DB] -----------------------------------------------');
+    console.log('[DB] 天工运维平台元数据库初始化完成，表结构已同步。');
+    console.log('[DB] -----------------------------------------------');
   } catch (err) {
-    console.error('CRITICAL: Database initialization failed!', err.message);
+    console.error('!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!');
+    console.error('[DB] 关键错误: 数据库初始化失败！');
+    console.error(`[DB] 错误原因: ${err.message}`);
+    console.error('[DB] 请检查: 1.MySQL服务是否启动 2.账号密码是否正确 3.IP是否可达');
+    console.error('!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!');
     pool = null;
   }
 }
 
 const checkDbReady = (req, res, next) => {
-  if (!pool) return res.status(503).json({ success: false, error: '元数据库服务不可用' });
+  if (!pool) return res.status(503).json({ success: false, error: '元数据库服务初始化失败或未连接，请检查后台日志' });
   next();
 };
 
 // --- API 路由 ---
 
-// 登录验证
 app.post('/api/login', checkDbReady, async (req, res) => {
   const { username, password } = req.body;
   try {
@@ -160,7 +172,6 @@ app.post('/api/login', checkDbReady, async (req, res) => {
   }
 });
 
-// 获取门户聚合数据 (公告 + 子应用)
 app.get('/api/portal/data', checkDbReady, async (req, res) => {
   try {
     const [apps] = await pool.query('SELECT * FROM sub_apps WHERE is_active = TRUE ORDER BY sort_order ASC');
@@ -171,7 +182,6 @@ app.get('/api/portal/data', checkDbReady, async (req, res) => {
   }
 });
 
-// 数据源 API (保留原有并适配)
 app.get('/api/sources', checkDbReady, async (req, res) => {
   try {
     const [rows] = await pool.query('SELECT * FROM data_sources');
@@ -217,7 +227,7 @@ app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, 'dist', 'index.html'));
 });
 
-app.listen(PORT, () => {
-  initDB();
-  console.log(`Server listening on port ${PORT}`);
+app.listen(PORT, async () => {
+  console.log(`[SYS] 服务已启动，监听端口: ${PORT}`);
+  await initDB();
 });
