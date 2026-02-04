@@ -16,9 +16,9 @@ app.use(express.static(path.join(__dirname, 'dist')));
 
 // 数据库基础连接配置
 const dbBaseConfig = {
-  host: process.env.DB_HOST || 'localhost',
+  host: process.env.DB_HOST || '192.168.21.60',
   user: process.env.DB_USER || 'root',
-  password: process.env.DB_PASSWORD || '123456',
+  password: process.env.DB_PASSWORD || '249gaqLY4pdeHH71T8',
   port: parseInt(process.env.DB_PORT || '3306'),
   connectTimeout: 5000
 };
