@@ -29,13 +29,10 @@ let pool = null;
 
 async function initDB() {
   try {
-    // 步骤1: 先建立一个不带数据库名的临时连接，用来创建库
     const tempConn = await mysql.createConnection(dbBaseConfig);
     await tempConn.query(`CREATE DATABASE IF NOT EXISTS ${DB_NAME} CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`);
     await tempConn.end();
-    console.log(`Database "${DB_NAME}" confirmed/created.`);
 
-    // 步骤2: 初始化正式连接池
     pool = mysql.createPool({
       ...dbBaseConfig,
       database: DB_NAME,
@@ -44,7 +41,55 @@ async function initDB() {
       queueLimit: 0
     });
 
-    // 步骤3: 创建数据源管理表
+    // 1. 权限角色表
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS roles (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        name VARCHAR(50) NOT NULL UNIQUE,
+        description VARCHAR(255)
+      )
+    `);
+
+    // 2. 账号表
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS users (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        username VARCHAR(50) NOT NULL UNIQUE,
+        password VARCHAR(100) NOT NULL,
+        real_name VARCHAR(100),
+        role_id INT,
+        avatar_url VARCHAR(255),
+        status VARCHAR(20) DEFAULT 'active'
+      )
+    `);
+
+    // 3. 系统公告表
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS announcements (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        title VARCHAR(200) NOT NULL,
+        content TEXT,
+        app_context VARCHAR(50),
+        priority VARCHAR(20),
+        publish_date DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    // 4. 子应用连接表
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS sub_apps (
+        id VARCHAR(50) PRIMARY KEY,
+        name VARCHAR(100) NOT NULL,
+        description TEXT,
+        icon_type VARCHAR(50),
+        color_theme VARCHAR(50),
+        route_path VARCHAR(100),
+        is_active BOOLEAN DEFAULT TRUE,
+        sort_order INT DEFAULT 0
+      )
+    `);
+
+    // 5. 数据源管理表 (原有)
     await pool.query(`
       CREATE TABLE IF NOT EXISTS data_sources (
         id VARCHAR(50) PRIMARY KEY,
@@ -59,62 +104,94 @@ async function initDB() {
         last_scanned VARCHAR(50)
       )
     `);
-    console.log(`Table "data_sources" ready in ${DB_NAME}.`);
+
+    // 初始化预置数据 (如果表为空)
+    const [roles] = await pool.query('SELECT count(*) as count FROM roles');
+    if (roles[0].count === 0) {
+      await pool.query("INSERT INTO roles (name, description) VALUES ('admin', '超级管理员'), ('ops', '运维工程师'), ('viewer', '只读用户')");
+      await pool.query("INSERT INTO users (username, password, real_name, role_id) VALUES ('Admin', 'admin123', '高级运维专家-王工', 1)");
+      
+      await pool.query(`
+        INSERT INTO sub_apps (id, name, description, icon_type, color_theme, route_path, sort_order) VALUES 
+        ('DATABASE_MANAGER', 'DB 云管平台', 'JDBC 连接管理、全量敏感词扫描、AI 自动化巡检日报', 'Database', 'blue', '/db', 1),
+        ('SERVER_MANAGER', 'IT 资产系统', '全网 CMDB、服务器生命周期追踪、多云主机纳管与审计', 'Server', 'indigo', '/server', 2),
+        ('NETWORK_MANAGER', '流量监控中心', '全链路拓扑发现、实时流量分析、边界防火墙规则审计', 'Globe', 'emerald', '/network', 3),
+        ('SECURITY_AUDIT', '安全合规平台', '基线合规性检查、系统漏洞定期扫描、零信任准入管理', 'Shield', 'amber', '/security', 4)
+      `);
+
+      await pool.query(`
+        INSERT INTO announcements (title, content, app_context, priority) VALUES 
+        ('元数据库初始化成功', '天工平台核心元数据存储已成功挂载。', '门户', 'medium'),
+        ('紧急安全补丁通知', '请所有 DBA 在本周五前完成生产库的 SSL 证书更新。', '数据库管理平台', 'high')
+      `);
+    }
+
+    console.log('Tiangong O&M Meta-database initialized successfully.');
   } catch (err) {
-    console.error('CRITICAL: Database initialization failed!');
-    console.error('Error Details:', err.message);
+    console.error('CRITICAL: Database initialization failed!', err.message);
     pool = null;
   }
 }
 
-// 检查元数据库是否就绪的中间件
 const checkDbReady = (req, res, next) => {
-  if (!pool) {
-    return res.status(503).json({ 
-      success: false, 
-      error: '元数据库连接失败。请检查后端 DB_HOST/DB_USER/DB_PASSWORD 是否正确，且 MySQL 服务已启动。' 
-    });
-  }
+  if (!pool) return res.status(503).json({ success: false, error: '元数据库服务不可用' });
   next();
 };
 
-// API: 获取所有数据源
-app.get('/api/sources', checkDbReady, async (req, res) => {
+// --- API 路由 ---
+
+// 登录验证
+app.post('/api/login', checkDbReady, async (req, res) => {
+  const { username, password } = req.body;
   try {
-    const [rows] = await pool.query('SELECT * FROM data_sources');
-    const sources = rows.map(r => ({
-      id: r.id,
-      name: r.name,
-      type: r.type,
-      host: r.host,
-      port: r.port,
-      database: r.database_name,
-      username: r.username,
-      status: r.status,
-      lastScanned: r.last_scanned
-    }));
-    res.json(sources);
+    const [users] = await pool.query(
+      'SELECT u.*, r.name as role_name FROM users u LEFT JOIN roles r ON u.role_id = r.id WHERE u.username = ? AND u.password = ?', 
+      [username, password]
+    );
+    if (users.length > 0) {
+      const user = users[0];
+      delete user.password;
+      res.json({ success: true, user });
+    } else {
+      res.status(401).json({ success: false, error: '账号或密码不正确' });
+    }
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }
 });
 
-// API: 新增或修改数据源 (UPSERT)
+// 获取门户聚合数据 (公告 + 子应用)
+app.get('/api/portal/data', checkDbReady, async (req, res) => {
+  try {
+    const [apps] = await pool.query('SELECT * FROM sub_apps WHERE is_active = TRUE ORDER BY sort_order ASC');
+    const [announcements] = await pool.query('SELECT * FROM announcements ORDER BY publish_date DESC LIMIT 5');
+    res.json({ success: true, apps, announcements });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// 数据源 API (保留原有并适配)
+app.get('/api/sources', checkDbReady, async (req, res) => {
+  try {
+    const [rows] = await pool.query('SELECT * FROM data_sources');
+    res.json(rows.map(r => ({
+      id: r.id, name: r.name, type: r.type, host: r.host, port: r.port, 
+      database: r.database_name, username: r.username, status: r.status, lastScanned: r.last_scanned
+    })));
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 app.post('/api/sources', checkDbReady, async (req, res) => {
   const s = req.body;
   try {
     await pool.query(
       `INSERT INTO data_sources (id, name, type, host, port, database_name, username, password, status, last_scanned) 
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) 
-       ON DUPLICATE KEY UPDATE 
-         name = VALUES(name), 
-         type = VALUES(type), 
-         host = VALUES(host), 
-         port = VALUES(port), 
-         database_name = VALUES(database_name), 
-         username = VALUES(username), 
-         password = VALUES(password), 
-         status = VALUES(status)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE 
+       name=VALUES(name), type=VALUES(type), host=VALUES(host), port=VALUES(port), 
+       database_name=VALUES(database_name), username=VALUES(username), password=VALUES(password)`,
       [s.id, s.name, s.type, s.host, s.port, s.database, s.username, s.password || '', s.status || 'online', s.lastScanned || '']
     );
     res.json({ success: true });
@@ -123,47 +200,16 @@ app.post('/api/sources', checkDbReady, async (req, res) => {
   }
 });
 
-// API: 物理删除数据源
-app.delete('/api/sources/:id', checkDbReady, async (req, res) => {
+app.post('/api/sources/test', async (req, res) => {
+  const { type, host, port, username, password, database } = req.body;
+  if (type !== 'mysql') return res.status(400).json({ success: false, error: '仅支持 MySQL 拨测' });
   try {
-    const [result] = await pool.query('DELETE FROM data_sources WHERE id = ?', [req.params.id]);
-    if (result.affectedRows === 0) {
-      return res.status(404).json({ success: false, error: '记录不存在' });
-    }
+    const conn = await mysql.createConnection({ host, port, user: username, password, database, connectTimeout: 3000 });
+    await conn.query('SELECT 1');
+    await conn.end();
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-// API: 真实物理拨测 (连接目标库)
-app.post('/api/sources/test', async (req, res) => {
-  const { type, host, port, username, password, database } = req.body;
-  
-  // 基础参数校验
-  if (!host || !username) {
-    return res.status(400).json({ success: false, error: '主机地址和用户名不能为空' });
-  }
-
-  if (type !== 'mysql') {
-    return res.status(400).json({ success: false, error: '当前仅支持对远程 MySQL 实例进行物理拨测' });
-  }
-
-  try {
-    const conn = await mysql.createConnection({
-      host, 
-      port: parseInt(port || '3306'), 
-      user: username, 
-      password: password || '', 
-      database: database || undefined,
-      connectTimeout: 5000
-    });
-    await conn.query('SELECT 1');
-    await conn.end();
-    res.json({ success: true, message: '物理连接拨测成功' });
-  } catch (err) {
-    console.error('Test Connection Failed:', err.message);
-    res.status(500).json({ success: false, error: `连接失败: ${err.message}` });
   }
 });
 
@@ -173,5 +219,5 @@ app.get('*', (req, res) => {
 
 app.listen(PORT, () => {
   initDB();
-  console.log(`Tiangong Platform Server running on port ${PORT}`);
+  console.log(`Server listening on port ${PORT}`);
 });

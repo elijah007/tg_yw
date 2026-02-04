@@ -16,9 +16,10 @@ export const INITIAL_RULES: SensitiveRule[] = [
   { id: 'r4', name: '银行卡', pattern: 'card_no|bank', description: '银行卡账户信息', isActive: true },
 ];
 
+// Updated to match the Announcement interface (numeric IDs and correct property names)
 export const INITIAL_ANNOUNCEMENTS: Announcement[] = [
-  { id: 'a1', title: '数据库管理平台升级公告', content: '本周五凌晨2:00-4:00进行系统维护，期间扫描功能可能受限。', app: '数据库管理平台', date: '2024-05-20', priority: 'high' },
-  { id: 'a2', title: '新子应用上线预告', content: '资产管理系统即将集成进入天工平台。', app: '门户', date: '2024-05-18', priority: 'medium' },
+  { id: 1, title: '数据库管理平台升级公告', content: '本周五凌晨2:00-4:00进行系统维护，期间扫描功能可能受限。', app_context: '数据库管理平台', publish_date: '2024-05-20', priority: 'high' },
+  { id: 2, title: '新子应用上线预告', content: '资产管理系统即将集成进入天工平台。', app_context: '门户', publish_date: '2024-05-18', priority: 'medium' },
 ];
 
 export const APP_CONFIG = {

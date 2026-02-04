@@ -1,5 +1,5 @@
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { AppType, Announcement } from './types';
 import { INITIAL_ANNOUNCEMENTS } from './constants';
 import Layout from './components/Layout';
@@ -8,53 +8,91 @@ import DatabaseManager from './apps/DatabaseManager';
 
 const App: React.FC = () => {
   const [activeApp, setActiveApp] = useState<AppType>(AppType.PORTAL);
-  const [announcements] = useState<Announcement[]>(INITIAL_ANNOUNCEMENTS);
   const [isLoggedIn, setIsLoggedIn] = useState(false);
-  const [user, setUser] = useState({ name: '运维总监-王工', role: 'admin' });
+  const [user, setUser] = useState<any>(null);
+  const [loginError, setLoginError] = useState('');
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
 
-  // Simple mock login
+  const handleLogin = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    setLoginError('');
+    setIsLoggingIn(true);
+    
+    const formData = new FormData(e.currentTarget);
+    const username = formData.get('username');
+    const password = formData.get('password');
+
+    try {
+      const res = await fetch('/api/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password })
+      });
+      const data = await res.json();
+      
+      if (data.success) {
+        setUser(data.user);
+        setIsLoggedIn(true);
+      } else {
+        setLoginError(data.error || '登录失败，请检查账号密码');
+      }
+    } catch (err) {
+      setLoginError('无法连接到认证服务器');
+    } finally {
+      setIsLoggingIn(false);
+    }
+  };
+
   if (!isLoggedIn) {
     return (
       <div className="min-h-screen bg-slate-900 flex items-center justify-center p-6">
-        <div className="w-full max-w-md bg-white rounded-3xl p-8 shadow-2xl">
-          <div className="text-center mb-8">
-            <div className="w-16 h-16 bg-blue-600 rounded-2xl mx-auto flex items-center justify-center mb-4 shadow-xl">
-               <span className="text-white text-2xl font-black">天工</span>
+        <div className="w-full max-w-md bg-white rounded-3xl p-10 shadow-2xl animate-in zoom-in-95 duration-300">
+          <div className="text-center mb-10">
+            <div className="w-20 h-20 bg-blue-600 rounded-[24px] mx-auto flex items-center justify-center mb-6 shadow-2xl shadow-blue-500/20">
+               <span className="text-white text-3xl font-black">天工</span>
             </div>
-            <h1 className="text-2xl font-bold text-slate-800">平台登录验证</h1>
-            <p className="text-slate-400 mt-2 italic">欢迎回来，请验证您的身份</p>
+            <h1 className="text-3xl font-black text-slate-800">元数据认证</h1>
+            <p className="text-slate-400 mt-2 font-medium">Ops Platform Authentication</p>
           </div>
 
-          <form className="space-y-6" onSubmit={(e) => { e.preventDefault(); setIsLoggedIn(true); }}>
+          <form className="space-y-6" onSubmit={handleLogin}>
+            {loginError && (
+              <div className="p-4 bg-red-50 border border-red-100 text-red-600 text-sm font-bold rounded-xl animate-shake">
+                {loginError}
+              </div>
+            )}
             <div>
-              <label className="block text-sm font-semibold text-slate-700 mb-2">管理账号</label>
+              <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">管理账号</label>
               <input 
+                name="username"
                 type="text" 
-                className="w-full px-4 py-3 border border-slate-200 rounded-xl bg-slate-50 focus:ring-2 ring-blue-500 outline-none transition-all"
-                placeholder="Admin"
+                className="w-full px-5 py-4 border border-slate-200 rounded-2xl bg-slate-50 focus:ring-4 ring-blue-500/10 focus:border-blue-500 outline-none transition-all font-bold"
+                placeholder="请输入账号"
                 required
               />
             </div>
             <div>
-              <label className="block text-sm font-semibold text-slate-700 mb-2">安全密码</label>
+              <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">安全密码</label>
               <input 
+                name="password"
                 type="password" 
-                className="w-full px-4 py-3 border border-slate-200 rounded-xl bg-slate-50 focus:ring-2 ring-blue-500 outline-none transition-all"
+                className="w-full px-5 py-4 border border-slate-200 rounded-2xl bg-slate-50 focus:ring-4 ring-blue-500/10 focus:border-blue-500 outline-none transition-all font-bold"
                 placeholder="••••••••"
                 required
               />
             </div>
             <button 
               type="submit"
-              className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-4 rounded-xl shadow-lg shadow-blue-200 transition-all active:scale-95"
+              disabled={isLoggingIn}
+              className="w-full bg-blue-600 hover:bg-blue-700 text-white font-black py-5 rounded-2xl shadow-xl shadow-blue-500/20 transition-all active:scale-95 disabled:opacity-50"
             >
-              登 录
+              {isLoggingIn ? '身份校验中...' : '立即登录'}
             </button>
           </form>
           
-          <div className="mt-8 pt-8 border-t border-slate-100 flex justify-between text-xs text-slate-400">
-            <a href="#" className="hover:text-blue-500">忘记密码?</a>
-            <span>版本 v2.5.4</span>
+          <div className="mt-10 pt-8 border-t border-slate-50 flex justify-between text-[10px] font-black text-slate-300 uppercase tracking-widest">
+            <a href="#" className="hover:text-blue-500 transition-colors">密码找回</a>
+            <span>Build v2.6.0-stable</span>
           </div>
         </div>
       </div>
@@ -62,12 +100,9 @@ const App: React.FC = () => {
   }
 
   return (
-    <Layout activeApp={activeApp} onNavigate={setActiveApp} userName={user.name}>
+    <Layout activeApp={activeApp} onNavigate={setActiveApp} userName={user?.real_name || '未知用户'}>
       {activeApp === AppType.PORTAL && (
-        <Portal 
-          onSelectApp={setActiveApp} 
-          announcements={announcements} 
-        />
+        <Portal onSelectApp={setActiveApp} />
       )}
       
       {activeApp === AppType.DATABASE_MANAGER && (
@@ -76,16 +111,16 @@ const App: React.FC = () => {
 
       {activeApp !== AppType.PORTAL && activeApp !== AppType.DATABASE_MANAGER && (
         <div className="flex flex-col items-center justify-center h-full p-20 text-center animate-pulse">
-           <div className="bg-slate-100 p-8 rounded-full mb-6">
-              <span className="text-6xl text-slate-300">🏗️</span>
+           <div className="bg-slate-100 p-10 rounded-full mb-8">
+              <span className="text-7xl">🏗️</span>
            </div>
-           <h2 className="text-2xl font-bold text-slate-800 mb-2">建设中...</h2>
-           <p className="text-slate-500 mb-8">该模块正在加紧集成，敬请期待。</p>
+           <h2 className="text-3xl font-black text-slate-800 mb-3 uppercase tracking-tighter">模块建设中</h2>
+           <p className="text-slate-400 font-medium mb-10 max-w-sm">该子系统正在同步元数据并建立连接池，请稍后再试。</p>
            <button 
              onClick={() => setActiveApp(AppType.PORTAL)}
-             className="px-6 py-2 bg-blue-600 text-white rounded-xl font-bold"
+             className="px-10 py-4 bg-slate-900 text-white rounded-2xl font-black shadow-2xl hover:bg-slate-800 transition-all"
            >
-             返回门户
+             返回中枢门户
            </button>
         </div>
       )}

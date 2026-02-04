@@ -3,7 +3,8 @@ export enum AppType {
   PORTAL = 'PORTAL',
   DATABASE_MANAGER = 'DATABASE_MANAGER',
   SERVER_MANAGER = 'SERVER_MANAGER',
-  NETWORK_MANAGER = 'NETWORK_MANAGER'
+  NETWORK_MANAGER = 'NETWORK_MANAGER',
+  SECURITY_AUDIT = 'SECURITY_AUDIT'
 }
 
 export type DatabaseType = 'mysql' | 'postgresql' | 'mongodb';
@@ -21,12 +22,23 @@ export interface DataSource {
   lastScanned?: string;
 }
 
-export interface SensitiveRule {
+export interface Announcement {
+  id: number;
+  title: string;
+  content: string;
+  app_context: string;
+  publish_date: string;
+  priority: 'low' | 'medium' | 'high';
+}
+
+export interface SubApp {
   id: string;
   name: string;
-  pattern: string;
   description: string;
-  isActive: boolean;
+  icon_type: string;
+  color_theme: string;
+  route_path: string;
+  is_active: boolean;
 }
 
 export interface ScanResult {
@@ -49,11 +61,11 @@ export interface InspectionRecord {
   instanceId: string;
 }
 
-export interface Announcement {
+// Added missing SensitiveRule interface to fix compilation errors
+export interface SensitiveRule {
   id: string;
-  title: string;
-  content: string;
-  app: string;
-  date: string;
-  priority: 'low' | 'medium' | 'high';
+  name: string;
+  pattern: string;
+  description: string;
+  isActive: boolean;
 }
