@@ -8,9 +8,8 @@ import {
   GitBranch, Clock, FileCode, Wifi
 } from 'lucide-react';
 import { DataSource, SensitiveRule, InspectionRecord, DatabaseType } from '../../types';
-import { INITIAL_DATA_SOURCES } from '../../constants';
 import DataSourceModal from './DataSourceModal';
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area, BarChart, Bar } from 'recharts';
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area } from 'recharts';
 
 const DatabaseManager: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'dashboard' | 'sources' | 'sensitive' | 'inspection' | 'profile'>('dashboard');
@@ -23,15 +22,26 @@ const DatabaseManager: React.FC = () => {
   const [sourceToDelete, setSourceToDelete] = useState<string | null>(null);
   const [testResult, setTestResult] = useState<Record<string, { status: 'success' | 'error' | 'loading' | null, msg?: string }>>({});
 
+  // 稳健的 JSON 获取工具
+  const safeFetchJson = async (url: string, options?: RequestInit) => {
+    try {
+      const res = await fetch(url, options);
+      const text = await res.text();
+      return JSON.parse(text);
+    } catch (e) {
+      throw new Error("接口响应解析失败，请检查后端运行状态。");
+    }
+  };
+
   const fetchSources = async () => {
     try {
       setLoading(true);
-      const res = await fetch('/api/sources');
-      const data = await res.json();
-      setSources(data);
-    } catch (err) {
-      console.error('Fetch error:', err);
-      setSources(INITIAL_DATA_SOURCES);
+      const data = await safeFetchJson('/api/sources');
+      if (Array.isArray(data)) {
+        setSources(data);
+      }
+    } catch (err: any) {
+      console.error('Fetch error:', err.message);
     } finally {
       setLoading(false);
     }
@@ -44,73 +54,74 @@ const DatabaseManager: React.FC = () => {
   const handleTestConnection = async (source: DataSource) => {
     const id = source.id;
     setTestResult(prev => ({ ...prev, [id]: { status: 'loading' } }));
-    
     try {
-      const res = await fetch('/api/sources/test', {
+      const data = await safeFetchJson('/api/sources/test', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(source) // 假设 DataSource 包含 host, port 等
+        body: JSON.stringify(source)
       });
-      const data = await res.json();
-      
-      if (res.ok && data.success) {
+      if (data.success) {
         setTestResult(prev => ({ ...prev, [id]: { status: 'success' } }));
       } else {
         setTestResult(prev => ({ ...prev, [id]: { status: 'error', msg: data.error } }));
       }
     } catch (err: any) {
-      setTestResult(prev => ({ ...prev, [id]: { status: 'error', msg: '网络错误' } }));
+      setTestResult(prev => ({ ...prev, [id]: { status: 'error', msg: '请求超时' } }));
     }
-
-    // 3秒后清除结果显示
     setTimeout(() => {
       setTestResult(prev => {
         const next = { ...prev };
         delete next[id];
         return next;
       });
-    }, 5000);
+    }, 4000);
   };
 
   const handleSaveSource = async (data: Partial<DataSource>) => {
+    // 如果 editingSource 存在，说明是修改，沿用原 ID；否则生成新 ID
     const payload = editingSource 
       ? { ...editingSource, ...data } 
-      : { ...data, id: Date.now().toString(), status: 'online' };
+      : { ...data, id: `ds_${Date.now()}`, status: 'online' };
 
     try {
-      await fetch('/api/sources', {
+      const resData = await safeFetchJson('/api/sources', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
       });
-      fetchSources();
-      setIsModalOpen(false);
+      if (resData.success) {
+        await fetchSources(); // 重新拉取数据库最新真实列表
+        setIsModalOpen(false);
+      } else {
+        alert('保存失败: ' + resData.error);
+      }
     } catch (err: any) {
-      alert('保存失败: ' + err.message);
+      alert('网络异常: ' + err.message);
     }
   };
 
   const confirmDelete = async () => {
     if (sourceToDelete) {
       try {
-        await fetch(`/api/sources/${sourceToDelete}`, { method: 'DELETE' });
-        fetchSources();
-        setSourceToDelete(null);
-        setIsDeleteModalOpen(false);
-      } catch (err) {
-        alert('删除失败');
+        const resData = await safeFetchJson(`/api/sources/${sourceToDelete}`, { method: 'DELETE' });
+        if (resData.success) {
+          // 真正的数据库删除成功后，再更新 UI
+          setSources(prev => prev.filter(s => s.id !== sourceToDelete));
+          setSourceToDelete(null);
+          setIsDeleteModalOpen(false);
+        } else {
+          alert('删除失败: ' + resData.error);
+        }
+      } catch (err: any) {
+        alert('删除操作异常');
       }
     }
   };
 
-  // 图表数据
   const chartData = [
-    { time: '00:00', connections: 45 },
-    { time: '04:00', connections: 32 },
-    { time: '08:00', connections: 120 },
-    { time: '12:00', connections: 250 },
-    { time: '16:00', connections: 210 },
-    { time: '20:00', connections: 95 },
+    { time: '00:00', connections: 45 }, { time: '04:00', connections: 32 },
+    { time: '08:00', connections: 120 }, { time: '12:00', connections: 250 },
+    { time: '16:00', connections: 210 }, { time: '20:00', connections: 95 },
   ];
 
   return (
@@ -127,7 +138,7 @@ const DatabaseManager: React.FC = () => {
           </button>
           <button onClick={() => setActiveTab('sensitive')} className={`w-full flex items-center space-x-3 px-4 py-3 rounded-xl transition-all ${activeTab === 'sensitive' ? 'bg-blue-600 text-white shadow-lg' : 'text-slate-500 hover:bg-slate-50'}`}>
             <Shield className="w-5 h-5" />
-            <span className="font-medium">敏感数据发现</span>
+            <span className="font-medium">敏感发现</span>
           </button>
           <button onClick={() => setActiveTab('inspection')} className={`w-full flex items-center space-x-3 px-4 py-3 rounded-xl transition-all ${activeTab === 'inspection' ? 'bg-blue-600 text-white shadow-lg' : 'text-slate-500 hover:bg-slate-50'}`}>
             <Activity className="w-5 h-5" />
@@ -137,17 +148,11 @@ const DatabaseManager: React.FC = () => {
       </aside>
 
       <div className="flex-1 p-8 bg-slate-50 overflow-y-auto">
-        {loading && <div className="flex items-center justify-center h-full"><RefreshCw className="animate-spin text-blue-500" /></div>}
+        {loading && <div className="flex items-center justify-center h-full"><RefreshCw className="animate-spin text-blue-500 w-10 h-10" /></div>}
         
         {!loading && activeTab === 'dashboard' && (
           <div className="space-y-8 animate-in fade-in duration-500">
-             <div className="flex items-center justify-between">
-              <div>
-                <h2 className="text-2xl font-bold text-slate-800">数据库运行概览</h2>
-                <p className="text-slate-500">后端连接池实时监控中</p>
-              </div>
-            </div>
-            {/* ... Dashboard stats remain same ... */}
+            <h2 className="text-2xl font-bold text-slate-800">数据库运行概览</h2>
             <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
               {[
                 { label: '连接实例', val: sources.length, icon: <DbIcon />, color: 'text-blue-600', bg: 'bg-blue-50', link: 'sources' },
@@ -156,9 +161,7 @@ const DatabaseManager: React.FC = () => {
                 { label: '预警事件', val: '0', icon: <AlertTriangle />, color: 'text-slate-400', bg: 'bg-slate-50', link: 'inspection' },
               ].map((stat, i) => (
                 <div key={i} onClick={() => setActiveTab(stat.link as any)} className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm cursor-pointer hover:shadow-md transition-all group">
-                  <div className="flex items-center justify-between mb-2">
-                    <div className={`p-2 rounded-lg ${stat.bg} ${stat.color} group-hover:scale-110 transition-transform`}>{stat.icon}</div>
-                  </div>
+                  <div className={`p-2 w-fit rounded-lg ${stat.bg} ${stat.color} group-hover:scale-110 transition-transform mb-4`}>{stat.icon}</div>
                   <p className="text-sm text-slate-500 font-medium">{stat.label}</p>
                   <p className={`text-2xl font-bold ${stat.color}`}>{stat.val}</p>
                 </div>
@@ -183,59 +186,66 @@ const DatabaseManager: React.FC = () => {
             <div className="flex justify-between items-center">
               <div>
                 <h2 className="text-2xl font-bold text-slate-800">数据源管理</h2>
-                <p className="text-slate-500">点击 Wi-Fi 图标可发起物理拨测</p>
+                <p className="text-slate-500">点击侧边按钮修改或测试物理连接</p>
               </div>
-              <button onClick={() => { setEditingSource(null); setIsModalOpen(true); }} className="bg-blue-600 text-white px-4 py-2 rounded-xl flex items-center shadow-lg hover:bg-blue-700">
-                <Plus className="w-4 h-4 mr-2" /> 新增数据源
+              <button onClick={() => { setEditingSource(null); setIsModalOpen(true); }} className="bg-blue-600 text-white px-5 py-2.5 rounded-xl flex items-center font-bold shadow-lg shadow-blue-100 hover:bg-blue-700 active:scale-95 transition-all">
+                <Plus className="w-5 h-5 mr-2" /> 新增 JDBC 数据源
               </button>
             </div>
 
-            <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
+            <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm">
               <table className="w-full text-left">
                 <thead className="bg-slate-50 border-b border-slate-200">
                   <tr>
-                    <th className="px-6 py-4 text-sm font-semibold text-slate-600">实例名称</th>
-                    <th className="px-6 py-4 text-sm font-semibold text-slate-600">类型</th>
-                    <th className="px-6 py-4 text-sm font-semibold text-slate-600">地址端口</th>
-                    <th className="px-6 py-4 text-sm font-semibold text-slate-600 text-right">操作</th>
+                    <th className="px-6 py-4 text-sm font-bold text-slate-600">实例名称 / 库名</th>
+                    <th className="px-6 py-4 text-sm font-bold text-slate-600">类型</th>
+                    <th className="px-6 py-4 text-sm font-bold text-slate-600">地址端口</th>
+                    <th className="px-6 py-4 text-sm font-bold text-slate-600 text-right">管理操作</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {sources.map((source) => (
-                    <tr key={source.id} className="hover:bg-slate-50/50 group">
-                      <td className="px-6 py-4">
-                        <div className="font-semibold text-slate-800">{source.name}</div>
-                        <div className="text-xs text-slate-400">{source.database}</div>
-                      </td>
-                      <td className="px-6 py-4 capitalize text-sm">{source.type}</td>
-                      <td className="px-6 py-4 text-sm text-slate-600">{source.host}:{source.port}</td>
-                      <td className="px-6 py-4 text-right space-x-2">
-                        <button 
-                          onClick={() => handleTestConnection(source)}
-                          title="测试连接"
-                          className={`p-2 rounded-lg transition-colors ${
-                            testResult[source.id]?.status === 'success' ? 'text-emerald-600 bg-emerald-50' : 
-                            testResult[source.id]?.status === 'error' ? 'text-red-600 bg-red-50' : 
-                            testResult[source.id]?.status === 'loading' ? 'text-blue-600' : 'text-slate-400 hover:text-blue-600 hover:bg-blue-50'
-                          }`}
-                        >
-                          <Wifi className={`w-4 h-4 ${testResult[source.id]?.status === 'loading' ? 'animate-pulse' : ''}`} />
-                        </button>
-                        <button onClick={() => { setEditingSource(source); setIsModalOpen(true); }} className="p-2 text-slate-400 hover:text-indigo-600"><Settings className="w-4 h-4" /></button>
-                        <button onClick={() => { setSourceToDelete(source.id); setIsDeleteModalOpen(true); }} className="p-2 text-slate-400 hover:text-red-600"><Trash2 className="w-4 h-4" /></button>
-                      </td>
-                    </tr>
-                  ))}
+                  {sources.length === 0 ? (
+                    <tr><td colSpan={4} className="px-6 py-20 text-center text-slate-400">暂无真实数据，请添加您的第一个数据源</td></tr>
+                  ) : (
+                    sources.map((source) => (
+                      <tr key={source.id} className="hover:bg-slate-50/50 group transition-colors">
+                        <td className="px-6 py-4">
+                          <div className="font-bold text-slate-800 group-hover:text-blue-600 transition-colors">{source.name}</div>
+                          <div className="text-xs text-slate-400 font-medium">{source.database}</div>
+                        </td>
+                        <td className="px-6 py-4">
+                          <span className="px-2 py-1 bg-slate-100 rounded text-xs font-bold text-slate-500 uppercase">{source.type}</span>
+                        </td>
+                        <td className="px-6 py-4 text-sm text-slate-600 font-mono">{source.host}:{source.port}</td>
+                        <td className="px-6 py-4 text-right space-x-1">
+                          <button 
+                            onClick={() => handleTestConnection(source)}
+                            title="物理拨测"
+                            className={`p-2.5 rounded-lg transition-all ${
+                              testResult[source.id]?.status === 'success' ? 'text-emerald-600 bg-emerald-50' : 
+                              testResult[source.id]?.status === 'error' ? 'text-red-600 bg-red-50' : 
+                              testResult[source.id]?.status === 'loading' ? 'text-blue-600 bg-blue-50' : 'text-slate-400 hover:text-blue-600 hover:bg-blue-50'
+                            }`}
+                          >
+                            <Wifi className={`w-4 h-4 ${testResult[source.id]?.status === 'loading' ? 'animate-pulse' : ''}`} />
+                          </button>
+                          <button onClick={() => { setEditingSource(source); setIsModalOpen(true); }} className="p-2.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-all"><Settings className="w-4 h-4" /></button>
+                          <button onClick={() => { setSourceToDelete(source.id); setIsDeleteModalOpen(true); }} className="p-2.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all"><Trash2 className="w-4 h-4" /></button>
+                        </td>
+                      </tr>
+                    ))
+                  )}
                 </tbody>
               </table>
             </div>
             
-            {/* 错误提示浮窗 */}
-            {/* Added explicit type to destructured variables in Object.entries to fix 'unknown' type inference errors */}
             {Object.entries(testResult).filter(([_, v]: [string, any]) => v.status === 'error').map(([id, v]: [string, any]) => (
-              <div key={id} className="fixed bottom-10 right-10 bg-red-600 text-white px-6 py-3 rounded-2xl shadow-2xl flex items-center space-x-2 animate-bounce">
-                <AlertTriangle className="w-5 h-5" />
-                <span>实例 [{sources.find(s => s.id === id)?.name}] 连接失败: {v.msg}</span>
+              <div key={id} className="fixed bottom-10 right-10 bg-red-600 text-white px-6 py-4 rounded-2xl shadow-2xl flex items-center space-x-3 animate-in slide-in-from-right duration-300">
+                <AlertTriangle className="w-5 h-5 shrink-0" />
+                <div className="text-sm">
+                   <p className="font-bold">[{sources.find(s => s.id === id)?.name}] 连接失败</p>
+                   <p className="opacity-90">{v.msg}</p>
+                </div>
               </div>
             ))}
           </div>
@@ -251,13 +261,26 @@ const DatabaseManager: React.FC = () => {
       )}
 
       {isDeleteModalOpen && (
-        <div className="fixed inset-0 z-[110] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm">
-          <div className="bg-white w-full max-w-sm rounded-2xl p-6 text-center">
-            <AlertTriangle className="w-12 h-12 text-red-500 mx-auto mb-4" />
-            <h3 className="text-xl font-bold mb-6">确认删除记录？</h3>
-            <div className="grid grid-cols-2 gap-3">
-              <button onClick={() => setIsDeleteModalOpen(false)} className="px-4 py-2 bg-slate-100 rounded-xl">取消</button>
-              <button onClick={confirmDelete} className="px-4 py-2 bg-red-600 text-white rounded-xl">确认删除</button>
+        <div className="fixed inset-0 z-[110] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm px-4">
+          <div className="bg-white w-full max-w-sm rounded-3xl p-8 text-center shadow-2xl animate-in zoom-in-95 duration-200">
+            <div className="w-20 h-20 bg-red-50 rounded-full flex items-center justify-center mx-auto mb-6">
+               <Trash2 className="w-10 h-10 text-red-500" />
+            </div>
+            <h3 className="text-2xl font-bold text-slate-800 mb-2">确认永久删除？</h3>
+            <p className="text-slate-500 text-sm mb-8 leading-relaxed">此操作将从数据库中彻底抹除该配置，<br/>所有关联的自动巡检计划将失效。</p>
+            <div className="grid grid-cols-2 gap-4">
+              <button 
+                onClick={() => setIsDeleteModalOpen(false)} 
+                className="px-4 py-3 bg-slate-100 text-slate-600 rounded-2xl font-bold hover:bg-slate-200 transition-colors"
+              >
+                取消
+              </button>
+              <button 
+                onClick={confirmDelete} 
+                className="px-4 py-3 bg-red-600 text-white rounded-2xl font-bold hover:bg-red-700 shadow-xl shadow-red-100 transition-all active:scale-95"
+              >
+                确认删除
+              </button>
             </div>
           </div>
         </div>
