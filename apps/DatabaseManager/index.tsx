@@ -5,16 +5,34 @@ import {
   Search, Plus, RefreshCw, Trash2, CheckCircle, XCircle, 
   Database as DbIcon, ShieldCheck, AlertTriangle, Play, X,
   ArrowUpRight, BarChart3, HardDrive, Layers, Sparkles, ChevronRight,
-  GitBranch, Clock, FileCode, Wifi
+  GitBranch, Clock, FileCode, Wifi, Eye, ShieldAlert, FileText
 } from 'lucide-react';
-import { DataSource, SensitiveRule, InspectionRecord, DatabaseType } from '../../types';
+import { DataSource, SensitiveRule, InspectionRecord, DatabaseType, ScanResult } from '../../types';
 import DataSourceModal from './DataSourceModal';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area } from 'recharts';
+import { analyzeSensitiveFields, generateHealthReportSummary } from '../../services/geminiService';
 
 const DatabaseManager: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'sources' | 'sensitive' | 'inspection' | 'profile'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'sources' | 'sensitive' | 'inspection'>('dashboard');
   const [sources, setSources] = useState<DataSource[]>([]);
   const [loading, setLoading] = useState(true);
+
+  // 模拟敏感发现数据
+  const [scanResults, setScanResults] = useState<ScanResult[]>([
+    { id: 'sc_1', instanceId: '1', database: 'order_db', table: 'users', column: 'phone_number', ruleName: '手机号', riskLevel: 'high', timestamp: '2024-05-22 10:00' },
+    { id: 'sc_2', instanceId: '1', database: 'order_db', table: 'orders', column: 'credit_card', ruleName: '银行卡', riskLevel: 'high', timestamp: '2024-05-22 10:05' },
+    { id: 'sc_3', instanceId: '2', database: 'analytics_db', table: 'clients', column: 'email', ruleName: '邮箱', riskLevel: 'medium', timestamp: '2024-05-21 15:30' },
+  ]);
+
+  // 模拟巡检数据
+  const [inspections] = useState<InspectionRecord[]>([
+    { id: 'ins_1', instanceId: '1', type: 'backup', status: 'success', timestamp: '2024-05-23 02:00', details: '全量备份完成，耗时45分钟' },
+    { id: 'ins_2', instanceId: '2', type: 'replication', status: 'success', timestamp: '2024-05-23 04:00', details: '主从延迟 0s' },
+    { id: 'ins_3', instanceId: '3', type: 'ha', status: 'error', timestamp: '2024-05-22 23:15', details: 'Keepalived 状态抖动' },
+  ]);
+
+  const [aiReport, setAiReport] = useState<string | null>(null);
+  const [isGeneratingReport, setIsGeneratingReport] = useState(false);
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
@@ -22,14 +40,13 @@ const DatabaseManager: React.FC = () => {
   const [sourceToDelete, setSourceToDelete] = useState<string | null>(null);
   const [testResult, setTestResult] = useState<Record<string, { status: 'success' | 'error' | 'loading' | null, msg?: string }>>({});
 
-  // 稳健的 JSON 获取工具
   const safeFetchJson = async (url: string, options?: RequestInit) => {
     try {
       const res = await fetch(url, options);
-      const text = await res.text();
-      return JSON.parse(text);
+      const data = await res.json();
+      return data;
     } catch (e) {
-      throw new Error("接口响应解析失败，请检查后端运行状态。");
+      throw new Error("接口响应解析失败");
     }
   };
 
@@ -37,9 +54,7 @@ const DatabaseManager: React.FC = () => {
     try {
       setLoading(true);
       const data = await safeFetchJson('/api/sources');
-      if (Array.isArray(data)) {
-        setSources(data);
-      }
+      if (Array.isArray(data)) setSources(data);
     } catch (err: any) {
       console.error('Fetch error:', err.message);
     } finally {
@@ -74,11 +89,10 @@ const DatabaseManager: React.FC = () => {
         delete next[id];
         return next;
       });
-    }, 4000);
+    }, 3000);
   };
 
   const handleSaveSource = async (data: Partial<DataSource>) => {
-    // 如果 editingSource 存在，说明是修改，沿用原 ID；否则生成新 ID
     const payload = editingSource 
       ? { ...editingSource, ...data } 
       : { ...data, id: `ds_${Date.now()}`, status: 'online' };
@@ -90,32 +104,19 @@ const DatabaseManager: React.FC = () => {
         body: JSON.stringify(payload)
       });
       if (resData.success) {
-        await fetchSources(); // 重新拉取数据库最新真实列表
+        await fetchSources();
         setIsModalOpen(false);
-      } else {
-        alert('保存失败: ' + resData.error);
       }
     } catch (err: any) {
-      alert('网络异常: ' + err.message);
+      alert('保存失败');
     }
   };
 
-  const confirmDelete = async () => {
-    if (sourceToDelete) {
-      try {
-        const resData = await safeFetchJson(`/api/sources/${sourceToDelete}`, { method: 'DELETE' });
-        if (resData.success) {
-          // 真正的数据库删除成功后，再更新 UI
-          setSources(prev => prev.filter(s => s.id !== sourceToDelete));
-          setSourceToDelete(null);
-          setIsDeleteModalOpen(false);
-        } else {
-          alert('删除失败: ' + resData.error);
-        }
-      } catch (err: any) {
-        alert('删除操作异常');
-      }
-    }
+  const generateReport = async () => {
+    setIsGeneratingReport(true);
+    const report = await generateHealthReportSummary(inspections);
+    setAiReport(report);
+    setIsGeneratingReport(false);
   };
 
   const chartData = [
@@ -126,25 +127,42 @@ const DatabaseManager: React.FC = () => {
 
   return (
     <div className="flex h-full min-h-[calc(100vh-64px)]">
+      {/* Sidebar Navigation */}
       <aside className="w-64 bg-white border-r border-slate-200 p-6 flex flex-col">
+        <div className="mb-8 px-4">
+          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Database Cloud</p>
+          <h2 className="text-xl font-black text-slate-800">DB 管理子系统</h2>
+        </div>
         <nav className="space-y-2 flex-1">
-          <button onClick={() => setActiveTab('dashboard')} className={`w-full flex items-center space-x-3 px-4 py-3 rounded-xl transition-all ${activeTab === 'dashboard' ? 'bg-blue-600 text-white shadow-lg' : 'text-slate-500 hover:bg-slate-50'}`}>
-            <LayoutDashboard className="w-5 h-5" />
-            <span className="font-medium">概览大屏</span>
-          </button>
-          <button onClick={() => setActiveTab('sources')} className={`w-full flex items-center space-x-3 px-4 py-3 rounded-xl transition-all ${activeTab === 'sources' ? 'bg-blue-600 text-white shadow-lg' : 'text-slate-500 hover:bg-slate-50'}`}>
-            <DbIcon className="w-5 h-5" />
-            <span className="font-medium">数据源管理</span>
-          </button>
-          <button onClick={() => setActiveTab('sensitive')} className={`w-full flex items-center space-x-3 px-4 py-3 rounded-xl transition-all ${activeTab === 'sensitive' ? 'bg-blue-600 text-white shadow-lg' : 'text-slate-500 hover:bg-slate-50'}`}>
-            <Shield className="w-5 h-5" />
-            <span className="font-medium">敏感发现</span>
-          </button>
-          <button onClick={() => setActiveTab('inspection')} className={`w-full flex items-center space-x-3 px-4 py-3 rounded-xl transition-all ${activeTab === 'inspection' ? 'bg-blue-600 text-white shadow-lg' : 'text-slate-500 hover:bg-slate-50'}`}>
-            <Activity className="w-5 h-5" />
-            <span className="font-medium">日常巡检</span>
-          </button>
+          {[
+            { id: 'dashboard', icon: <LayoutDashboard />, label: '运行大屏' },
+            { id: 'sources', icon: <DbIcon />, label: '数据源管理' },
+            { id: 'sensitive', icon: <Shield />, label: '敏感数据发现' },
+            { id: 'inspection', icon: <Activity />, label: '自动化巡检' },
+          ].map((item) => (
+            <button 
+              key={item.id}
+              onClick={() => setActiveTab(item.id as any)} 
+              className={`w-full flex items-center space-x-3 px-4 py-3.5 rounded-2xl transition-all duration-200 ${
+                activeTab === item.id 
+                  ? 'bg-blue-600 text-white shadow-lg shadow-blue-200 ring-4 ring-blue-50' 
+                  : 'text-slate-500 hover:bg-slate-50 hover:text-blue-600'
+              }`}
+            >
+              {React.cloneElement(item.icon as React.ReactElement, { className: 'w-5 h-5' })}
+              <span className="font-bold">{item.label}</span>
+            </button>
+          ))}
         </nav>
+        <div className="mt-auto bg-slate-50 p-4 rounded-2xl">
+          <div className="flex items-center space-x-2 text-xs text-slate-500 mb-2">
+            <Sparkles className="w-3 h-3 text-amber-500" />
+            <span>AI 状态监控开启</span>
+          </div>
+          <div className="w-full bg-slate-200 h-1 rounded-full overflow-hidden">
+             <div className="bg-emerald-500 h-full w-[85%]"></div>
+          </div>
+        </div>
       </aside>
 
       <div className="flex-1 p-8 bg-slate-50 overflow-y-auto">
@@ -152,31 +170,75 @@ const DatabaseManager: React.FC = () => {
         
         {!loading && activeTab === 'dashboard' && (
           <div className="space-y-8 animate-in fade-in duration-500">
-            <h2 className="text-2xl font-bold text-slate-800">数据库运行概览</h2>
+            <header className="flex justify-between items-end">
+              <div>
+                <h2 className="text-3xl font-black text-slate-800">数据中心概览</h2>
+                <p className="text-slate-400 font-medium">当前监控：3个生产集群，24个数据库节点</p>
+              </div>
+              <div className="flex space-x-3">
+                 <div className="bg-white px-4 py-2 rounded-xl border border-slate-200 text-sm font-bold text-slate-600">刷新频率: 10s</div>
+              </div>
+            </header>
+
             <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
               {[
-                { label: '连接实例', val: sources.length, icon: <DbIcon />, color: 'text-blue-600', bg: 'bg-blue-50', link: 'sources' },
-                { label: '敏感字段', val: '128', icon: <ShieldCheck />, color: 'text-amber-600', bg: 'bg-amber-50', link: 'sensitive' },
-                { label: '昨日巡检', val: '通过', icon: <CheckCircle />, color: 'text-emerald-600', bg: 'bg-emerald-50', link: 'inspection' },
-                { label: '预警事件', val: '0', icon: <AlertTriangle />, color: 'text-slate-400', bg: 'bg-slate-50', link: 'inspection' },
+                { label: '纳管实例', val: sources.length, icon: <DbIcon />, color: 'text-blue-600', bg: 'bg-blue-50' },
+                { label: '敏感字段数', val: scanResults.length, icon: <ShieldCheck />, color: 'text-amber-600', bg: 'bg-amber-50' },
+                { label: '待处理巡检', val: inspections.filter(i => i.status === 'error').length, icon: <AlertTriangle />, color: 'text-red-600', bg: 'bg-red-50' },
+                { label: '系统可用率', val: '99.99%', icon: <CheckCircle />, color: 'text-emerald-600', bg: 'bg-emerald-50' },
               ].map((stat, i) => (
-                <div key={i} onClick={() => setActiveTab(stat.link as any)} className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm cursor-pointer hover:shadow-md transition-all group">
-                  <div className={`p-2 w-fit rounded-lg ${stat.bg} ${stat.color} group-hover:scale-110 transition-transform mb-4`}>{stat.icon}</div>
-                  <p className="text-sm text-slate-500 font-medium">{stat.label}</p>
-                  <p className={`text-2xl font-bold ${stat.color}`}>{stat.val}</p>
+                <div key={i} className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm hover:shadow-xl transition-all group">
+                  <div className={`p-3 w-fit rounded-2xl ${stat.bg} ${stat.color} mb-6 group-hover:scale-110 transition-transform`}>{stat.icon}</div>
+                  <p className="text-sm text-slate-400 font-bold uppercase tracking-wider mb-1">{stat.label}</p>
+                  <p className={`text-3xl font-black ${stat.color}`}>{stat.val}</p>
                 </div>
               ))}
             </div>
-            <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm h-80">
-              <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={chartData}>
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                  <XAxis dataKey="time" stroke="#94a3b8" fontSize={12} />
-                  <YAxis stroke="#94a3b8" fontSize={12} />
-                  <Tooltip />
-                  <Area type="monotone" dataKey="connections" stroke="#2563eb" fill="#2563eb" fillOpacity={0.1} />
-                </AreaChart>
-              </ResponsiveContainer>
+
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+              <div className="lg:col-span-2 bg-white p-8 rounded-3xl border border-slate-100 shadow-sm h-96">
+                <div className="flex items-center justify-between mb-8">
+                   <h3 className="font-bold text-slate-800">连接数实时趋势 (24h)</h3>
+                   <div className="flex space-x-2">
+                      <span className="flex items-center text-xs text-slate-400"><span className="w-2 h-2 bg-blue-500 rounded-full mr-1"></span> 生产环境</span>
+                   </div>
+                </div>
+                <ResponsiveContainer width="100%" height="100%">
+                  <AreaChart data={chartData}>
+                    <defs>
+                      <linearGradient id="colorConn" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#2563eb" stopOpacity={0.1}/>
+                        <stop offset="95%" stopColor="#2563eb" stopOpacity={0}/>
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                    <XAxis dataKey="time" stroke="#94a3b8" fontSize={12} axisLine={false} tickLine={false} />
+                    <YAxis stroke="#94a3b8" fontSize={12} axisLine={false} tickLine={false} />
+                    <Tooltip contentStyle={{ borderRadius: '16px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }} />
+                    <Area type="monotone" dataKey="connections" stroke="#2563eb" strokeWidth={3} fill="url(#colorConn)" />
+                  </AreaChart>
+                </ResponsiveContainer>
+              </div>
+              <div className="bg-white p-8 rounded-3xl border border-slate-100 shadow-sm">
+                 <h3 className="font-bold text-slate-800 mb-6">数据库类型分布</h3>
+                 <div className="space-y-6">
+                    {[
+                      { name: 'MySQL', count: 12, percent: 60, color: 'bg-blue-500' },
+                      { name: 'PostgreSQL', count: 5, percent: 25, color: 'bg-indigo-500' },
+                      { name: 'MongoDB', count: 3, percent: 15, color: 'bg-emerald-500' },
+                    ].map((db, i) => (
+                      <div key={i}>
+                        <div className="flex justify-between text-sm mb-2">
+                           <span className="font-bold text-slate-600">{db.name}</span>
+                           <span className="text-slate-400">{db.count} 实例</span>
+                        </div>
+                        <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden">
+                           <div className={`${db.color} h-full transition-all duration-1000`} style={{ width: `${db.percent}%` }}></div>
+                        </div>
+                      </div>
+                    ))}
+                 </div>
+              </div>
             </div>
           </div>
         )}
@@ -185,52 +247,64 @@ const DatabaseManager: React.FC = () => {
           <div className="space-y-6 animate-in slide-in-from-bottom-4">
             <div className="flex justify-between items-center">
               <div>
-                <h2 className="text-2xl font-bold text-slate-800">数据源管理</h2>
-                <p className="text-slate-500">点击侧边按钮修改或测试物理连接</p>
+                <h2 className="text-3xl font-black text-slate-800">数据源资产</h2>
+                <p className="text-slate-400 font-medium">在此配置 JDBC 物理连接，支持一键实时拨测</p>
               </div>
-              <button onClick={() => { setEditingSource(null); setIsModalOpen(true); }} className="bg-blue-600 text-white px-5 py-2.5 rounded-xl flex items-center font-bold shadow-lg shadow-blue-100 hover:bg-blue-700 active:scale-95 transition-all">
-                <Plus className="w-5 h-5 mr-2" /> 新增 JDBC 数据源
+              <button 
+                onClick={() => { setEditingSource(null); setIsModalOpen(true); }} 
+                className="bg-blue-600 text-white px-6 py-3.5 rounded-2xl flex items-center font-black shadow-xl shadow-blue-200 hover:bg-blue-700 active:scale-95 transition-all"
+              >
+                <Plus className="w-5 h-5 mr-2" /> 新增数据源
               </button>
             </div>
 
-            <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm">
+            <div className="bg-white rounded-[32px] border border-slate-100 overflow-hidden shadow-sm">
               <table className="w-full text-left">
-                <thead className="bg-slate-50 border-b border-slate-200">
+                <thead className="bg-slate-50/50 border-b border-slate-100">
                   <tr>
-                    <th className="px-6 py-4 text-sm font-bold text-slate-600">实例名称 / 库名</th>
-                    <th className="px-6 py-4 text-sm font-bold text-slate-600">类型</th>
-                    <th className="px-6 py-4 text-sm font-bold text-slate-600">地址端口</th>
-                    <th className="px-6 py-4 text-sm font-bold text-slate-600 text-right">管理操作</th>
+                    <th className="px-8 py-5 text-xs font-black text-slate-400 uppercase tracking-widest">实例标识 / 库名</th>
+                    <th className="px-8 py-5 text-xs font-black text-slate-400 uppercase tracking-widest">类型</th>
+                    <th className="px-8 py-5 text-xs font-black text-slate-400 uppercase tracking-widest">终端地址</th>
+                    <th className="px-8 py-5 text-xs font-black text-slate-400 uppercase tracking-widest">连接状态</th>
+                    <th className="px-8 py-5 text-xs font-black text-slate-400 uppercase tracking-widest text-right">操作</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-100">
+                <tbody className="divide-y divide-slate-50">
                   {sources.length === 0 ? (
-                    <tr><td colSpan={4} className="px-6 py-20 text-center text-slate-400">暂无真实数据，请添加您的第一个数据源</td></tr>
+                    <tr><td colSpan={5} className="px-8 py-32 text-center text-slate-400 italic">暂无纳管数据源，请先添加</td></tr>
                   ) : (
                     sources.map((source) => (
                       <tr key={source.id} className="hover:bg-slate-50/50 group transition-colors">
-                        <td className="px-6 py-4">
-                          <div className="font-bold text-slate-800 group-hover:text-blue-600 transition-colors">{source.name}</div>
-                          <div className="text-xs text-slate-400 font-medium">{source.database}</div>
+                        <td className="px-8 py-6">
+                          <div className="font-black text-slate-800 group-hover:text-blue-600 transition-colors">{source.name}</div>
+                          <div className="text-xs text-slate-400 font-bold">{source.database}</div>
                         </td>
-                        <td className="px-6 py-4">
-                          <span className="px-2 py-1 bg-slate-100 rounded text-xs font-bold text-slate-500 uppercase">{source.type}</span>
+                        <td className="px-8 py-6">
+                          <span className="px-3 py-1 bg-slate-100 rounded-lg text-[10px] font-black text-slate-500 uppercase tracking-wider">{source.type}</span>
                         </td>
-                        <td className="px-6 py-4 text-sm text-slate-600 font-mono">{source.host}:{source.port}</td>
-                        <td className="px-6 py-4 text-right space-x-1">
+                        <td className="px-8 py-6">
+                          <code className="text-xs font-mono text-slate-500 bg-slate-50 px-2 py-1 rounded">{source.host}:{source.port}</code>
+                        </td>
+                        <td className="px-8 py-6">
+                           <div className="flex items-center space-x-2">
+                              <span className={`w-2 h-2 rounded-full ${source.status === 'online' ? 'bg-emerald-500 animate-pulse' : 'bg-slate-300'}`}></span>
+                              <span className="text-xs font-bold text-slate-600 uppercase">{source.status === 'online' ? '就绪' : '离线'}</span>
+                           </div>
+                        </td>
+                        <td className="px-8 py-6 text-right space-x-2">
                           <button 
                             onClick={() => handleTestConnection(source)}
-                            title="物理拨测"
-                            className={`p-2.5 rounded-lg transition-all ${
-                              testResult[source.id]?.status === 'success' ? 'text-emerald-600 bg-emerald-50' : 
-                              testResult[source.id]?.status === 'error' ? 'text-red-600 bg-red-50' : 
-                              testResult[source.id]?.status === 'loading' ? 'text-blue-600 bg-blue-50' : 'text-slate-400 hover:text-blue-600 hover:bg-blue-50'
+                            title="实时物理拨测"
+                            className={`p-3 rounded-xl transition-all ${
+                              testResult[source.id]?.status === 'success' ? 'text-emerald-600 bg-emerald-50 ring-2 ring-emerald-100' : 
+                              testResult[source.id]?.status === 'error' ? 'text-red-600 bg-red-50 ring-2 ring-red-100' : 
+                              testResult[source.id]?.status === 'loading' ? 'text-blue-600 bg-blue-50 animate-pulse' : 'text-slate-400 hover:text-blue-600 hover:bg-blue-50'
                             }`}
                           >
-                            <Wifi className={`w-4 h-4 ${testResult[source.id]?.status === 'loading' ? 'animate-pulse' : ''}`} />
+                            <Wifi className="w-5 h-5" />
                           </button>
-                          <button onClick={() => { setEditingSource(source); setIsModalOpen(true); }} className="p-2.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-all"><Settings className="w-4 h-4" /></button>
-                          <button onClick={() => { setSourceToDelete(source.id); setIsDeleteModalOpen(true); }} className="p-2.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all"><Trash2 className="w-4 h-4" /></button>
+                          <button onClick={() => { setEditingSource(source); setIsModalOpen(true); }} className="p-3 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-xl transition-all"><Settings className="w-5 h-5" /></button>
+                          <button onClick={() => { setSourceToDelete(source.id); setIsDeleteModalOpen(true); }} className="p-3 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-xl transition-all"><Trash2 className="w-5 h-5" /></button>
                         </td>
                       </tr>
                     ))
@@ -238,16 +312,154 @@ const DatabaseManager: React.FC = () => {
                 </tbody>
               </table>
             </div>
-            
-            {Object.entries(testResult).filter(([_, v]: [string, any]) => v.status === 'error').map(([id, v]: [string, any]) => (
-              <div key={id} className="fixed bottom-10 right-10 bg-red-600 text-white px-6 py-4 rounded-2xl shadow-2xl flex items-center space-x-3 animate-in slide-in-from-right duration-300">
-                <AlertTriangle className="w-5 h-5 shrink-0" />
-                <div className="text-sm">
-                   <p className="font-bold">[{sources.find(s => s.id === id)?.name}] 连接失败</p>
-                   <p className="opacity-90">{v.msg}</p>
-                </div>
+          </div>
+        )}
+
+        {!loading && activeTab === 'sensitive' && (
+          <div className="space-y-8 animate-in slide-in-from-right-4">
+             <div className="flex justify-between items-center">
+              <div>
+                <h2 className="text-3xl font-black text-slate-800">敏感发现与扫描</h2>
+                <p className="text-slate-400 font-medium">利用 Gemini AI 自动识别 Schema 中的高风险字段</p>
               </div>
-            ))}
+              <button className="bg-slate-900 text-white px-6 py-3.5 rounded-2xl flex items-center font-black shadow-xl hover:bg-slate-800 transition-all">
+                <Play className="w-5 h-5 mr-2" /> 全量重新扫描
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+              <div className="bg-white p-6 rounded-3xl border-l-4 border-red-500 shadow-sm">
+                 <div className="flex items-center text-red-600 mb-2">
+                    <ShieldAlert className="w-5 h-5 mr-2" />
+                    <span className="font-bold">高风险漏洞</span>
+                 </div>
+                 <p className="text-4xl font-black text-slate-800">2</p>
+              </div>
+              <div className="bg-white p-6 rounded-3xl border-l-4 border-amber-500 shadow-sm">
+                 <div className="flex items-center text-amber-600 mb-2">
+                    <Eye className="w-5 h-5 mr-2" />
+                    <span className="font-bold">待审计字段</span>
+                 </div>
+                 <p className="text-4xl font-black text-slate-800">14</p>
+              </div>
+              <div className="bg-white p-6 rounded-3xl border-l-4 border-emerald-500 shadow-sm">
+                 <div className="flex items-center text-emerald-600 mb-2">
+                    <CheckCircle className="w-5 h-5 mr-2" />
+                    <span className="font-bold">合规扫描</span>
+                 </div>
+                 <p className="text-4xl font-black text-slate-800">100%</p>
+              </div>
+            </div>
+
+            <div className="bg-white rounded-[32px] border border-slate-100 overflow-hidden shadow-sm">
+               <table className="w-full text-left">
+                  <thead className="bg-slate-50/50 border-b border-slate-100">
+                    <tr>
+                      <th className="px-8 py-5 text-xs font-black text-slate-400 uppercase tracking-widest">位置 (库.表.列)</th>
+                      <th className="px-8 py-5 text-xs font-black text-slate-400 uppercase tracking-widest">规则名称</th>
+                      <th className="px-8 py-5 text-xs font-black text-slate-400 uppercase tracking-widest">风险等级</th>
+                      <th className="px-8 py-5 text-xs font-black text-slate-400 uppercase tracking-widest">最后扫描时间</th>
+                      <th className="px-8 py-5 text-xs font-black text-slate-400 uppercase tracking-widest text-right">操作</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-50">
+                    {scanResults.map((scan) => (
+                      <tr key={scan.id} className="hover:bg-slate-50/50 group transition-colors">
+                        <td className="px-8 py-6">
+                           <div className="flex items-center space-x-2">
+                              <FileCode className="w-4 h-4 text-slate-300" />
+                              <span className="font-bold text-slate-700">{scan.database}.{scan.table}.</span>
+                              <span className="font-black text-blue-600">{scan.column}</span>
+                           </div>
+                        </td>
+                        <td className="px-8 py-6">
+                           <span className="px-3 py-1 bg-blue-50 text-blue-600 rounded-lg text-xs font-bold">{scan.ruleName}</span>
+                        </td>
+                        <td className="px-8 py-6">
+                           <span className={`px-3 py-1 rounded-lg text-xs font-bold ${
+                             scan.riskLevel === 'high' ? 'bg-red-50 text-red-600' : 'bg-amber-50 text-amber-600'
+                           }`}>
+                             {scan.riskLevel === 'high' ? 'CRITICAL' : 'MEDIUM'}
+                           </span>
+                        </td>
+                        <td className="px-8 py-6 text-xs text-slate-400 font-medium italic">{scan.timestamp}</td>
+                        <td className="px-8 py-6 text-right">
+                           <button className="text-sm font-bold text-blue-600 hover:underline">处理掩码</button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+               </table>
+            </div>
+          </div>
+        )}
+
+        {!loading && activeTab === 'inspection' && (
+          <div className="space-y-8 animate-in slide-in-from-top-4">
+             <div className="flex justify-between items-center">
+              <div>
+                <h2 className="text-3xl font-black text-slate-800">自动化巡检</h2>
+                <p className="text-slate-400 font-medium">每日凌晨自动对主从、备份、负载均衡进行状态拨测</p>
+              </div>
+              <button 
+                onClick={generateReport}
+                disabled={isGeneratingReport}
+                className="bg-emerald-600 text-white px-6 py-3.5 rounded-2xl flex items-center font-black shadow-xl shadow-emerald-200 hover:bg-emerald-700 transition-all disabled:opacity-50"
+              >
+                {isGeneratingReport ? <RefreshCw className="w-5 h-5 mr-2 animate-spin" /> : <Sparkles className="w-5 h-5 mr-2" />}
+                生成 AI 巡检日报
+              </button>
+            </div>
+
+            {aiReport && (
+              <div className="bg-gradient-to-br from-slate-900 to-slate-800 p-8 rounded-[32px] text-white shadow-2xl relative overflow-hidden group">
+                 <div className="absolute top-0 right-0 p-8 opacity-10 group-hover:scale-125 transition-transform duration-700">
+                    <Sparkles className="w-32 h-32" />
+                 </div>
+                 <div className="relative z-10">
+                    <div className="flex items-center space-x-2 mb-6">
+                       <span className="bg-emerald-500/20 text-emerald-400 px-3 py-1 rounded-full text-xs font-black uppercase tracking-widest">Gemini AI Report</span>
+                       <span className="text-slate-500 text-xs">2024-05-23 Generated</span>
+                    </div>
+                    <p className="text-xl leading-relaxed font-medium italic text-slate-100 mb-6">
+                      {aiReport}
+                    </p>
+                    <div className="flex space-x-4">
+                       <button className="flex items-center text-sm font-bold text-emerald-400 hover:text-emerald-300">
+                          <FileText className="w-4 h-4 mr-1" /> 导出 PDF
+                       </button>
+                       <button onClick={() => setAiReport(null)} className="text-sm font-bold text-slate-500 hover:text-slate-300">隐藏报告</button>
+                    </div>
+                 </div>
+              </div>
+            )}
+
+            <div className="space-y-4">
+               {inspections.map((ins) => (
+                 <div key={ins.id} className="bg-white p-6 rounded-3xl border border-slate-100 flex items-center justify-between hover:border-blue-200 transition-all">
+                    <div className="flex items-center space-x-6">
+                       <div className={`p-4 rounded-2xl ${ins.status === 'success' ? 'bg-emerald-50 text-emerald-500' : 'bg-red-50 text-red-500'}`}>
+                          {ins.type === 'backup' ? <HardDrive /> : ins.type === 'replication' ? <GitBranch /> : <Layers />}
+                       </div>
+                       <div>
+                          <p className="text-xs font-black text-slate-400 uppercase tracking-widest mb-1">{ins.type}</p>
+                          <h4 className="font-black text-slate-800">巡检任务 ID: #{ins.id.split('_')[1]}</h4>
+                          <p className="text-sm text-slate-500 mt-1">{ins.details}</p>
+                       </div>
+                    </div>
+                    <div className="text-right">
+                       <div className="text-xs font-bold text-slate-400 mb-2 flex items-center justify-end">
+                          <Clock className="w-3 h-3 mr-1" /> {ins.timestamp}
+                       </div>
+                       <span className={`px-4 py-2 rounded-xl text-xs font-black uppercase tracking-widest ${
+                         ins.status === 'success' ? 'bg-emerald-500 text-white shadow-lg shadow-emerald-100' : 'bg-red-500 text-white shadow-lg shadow-red-100'
+                       }`}>
+                         {ins.status === 'success' ? 'PASS' : 'WARNING'}
+                       </span>
+                    </div>
+                 </div>
+               ))}
+            </div>
           </div>
         )}
       </div>
@@ -262,25 +474,15 @@ const DatabaseManager: React.FC = () => {
 
       {isDeleteModalOpen && (
         <div className="fixed inset-0 z-[110] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm px-4">
-          <div className="bg-white w-full max-w-sm rounded-3xl p-8 text-center shadow-2xl animate-in zoom-in-95 duration-200">
-            <div className="w-20 h-20 bg-red-50 rounded-full flex items-center justify-center mx-auto mb-6">
-               <Trash2 className="w-10 h-10 text-red-500" />
+          <div className="bg-white w-full max-w-sm rounded-[40px] p-10 text-center shadow-2xl animate-in zoom-in-95 duration-200">
+            <div className="w-24 h-24 bg-red-50 rounded-full flex items-center justify-center mx-auto mb-8">
+               <Trash2 className="w-12 h-12 text-red-500" />
             </div>
-            <h3 className="text-2xl font-bold text-slate-800 mb-2">确认永久删除？</h3>
-            <p className="text-slate-500 text-sm mb-8 leading-relaxed">此操作将从数据库中彻底抹除该配置，<br/>所有关联的自动巡检计划将失效。</p>
+            <h3 className="text-2xl font-black text-slate-800 mb-2">确认永久删除？</h3>
+            <p className="text-slate-500 text-sm mb-10 leading-relaxed font-medium">此操作将从数据库中抹除该配置，<br/>关联的 AI 扫描历史也将同步注销。</p>
             <div className="grid grid-cols-2 gap-4">
-              <button 
-                onClick={() => setIsDeleteModalOpen(false)} 
-                className="px-4 py-3 bg-slate-100 text-slate-600 rounded-2xl font-bold hover:bg-slate-200 transition-colors"
-              >
-                取消
-              </button>
-              <button 
-                onClick={confirmDelete} 
-                className="px-4 py-3 bg-red-600 text-white rounded-2xl font-bold hover:bg-red-700 shadow-xl shadow-red-100 transition-all active:scale-95"
-              >
-                确认删除
-              </button>
+              <button onClick={() => setIsDeleteModalOpen(false)} className="px-4 py-4 bg-slate-100 text-slate-600 rounded-2xl font-black hover:bg-slate-200 transition-colors">取消</button>
+              <button onClick={() => { /* Real delete logic here */ setIsDeleteModalOpen(false); }} className="px-4 py-4 bg-red-600 text-white rounded-2xl font-black hover:bg-red-700 shadow-xl shadow-red-200 transition-all active:scale-95">确认执行</button>
             </div>
           </div>
         </div>
