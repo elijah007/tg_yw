@@ -4,7 +4,8 @@ export enum AppType {
   DATABASE_MANAGER = 'DATABASE_MANAGER',
   SERVER_MANAGER = 'SERVER_MANAGER',
   NETWORK_MANAGER = 'NETWORK_MANAGER',
-  SECURITY_AUDIT = 'SECURITY_AUDIT'
+  SECURITY_AUDIT = 'SECURITY_AUDIT',
+  LOG_CENTER = 'LOG_CENTER'
 }
 
 export type DatabaseType = 'mysql' | 'postgresql' | 'mongodb';
@@ -41,6 +42,14 @@ export interface SubApp {
   is_active: boolean;
 }
 
+export interface LogEntry {
+  id: number;
+  level: 'INFO' | 'WARN' | 'ERROR' | 'DEBUG';
+  module: string;
+  message: string;
+  timestamp: string;
+}
+
 export interface ScanResult {
   id: string;
   instanceId: string;
@@ -61,7 +70,6 @@ export interface InspectionRecord {
   instanceId: string;
 }
 
-// Added missing SensitiveRule interface to fix compilation errors
 export interface SensitiveRule {
   id: string;
   name: string;

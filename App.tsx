@@ -5,6 +5,7 @@ import Layout from './components/Layout';
 import Portal from './apps/Portal';
 import DatabaseManager from './apps/DatabaseManager';
 import ServerManager from './apps/ServerManager';
+import LogCenter from './apps/LogCenter';
 
 const App: React.FC = () => {
   const [activeApp, setActiveApp] = useState<AppType>(AppType.PORTAL);
@@ -103,19 +104,13 @@ const App: React.FC = () => {
 
   return (
     <Layout activeApp={activeApp} onNavigate={setActiveApp} userName={user?.real_name || '高级运维'}>
-      {activeApp === AppType.PORTAL && (
-        <Portal onSelectApp={setActiveApp} />
-      )}
-      
-      {activeApp === AppType.DATABASE_MANAGER && (
-        <DatabaseManager />
-      )}
+      {activeApp === AppType.PORTAL && <Portal onSelectApp={setActiveApp} />}
+      {activeApp === AppType.DATABASE_MANAGER && <DatabaseManager />}
+      {activeApp === AppType.SERVER_MANAGER && <ServerManager />}
+      {activeApp === AppType.LOG_CENTER && <LogCenter />}
 
-      {activeApp === AppType.SERVER_MANAGER && (
-        <ServerManager />
-      )}
-
-      {activeApp !== AppType.PORTAL && activeApp !== AppType.DATABASE_MANAGER && activeApp !== AppType.SERVER_MANAGER && (
+      {activeApp !== AppType.PORTAL && activeApp !== AppType.DATABASE_MANAGER && 
+       activeApp !== AppType.SERVER_MANAGER && activeApp !== AppType.LOG_CENTER && (
         <div className="flex flex-col items-center justify-center h-full p-20 text-center animate-in fade-in zoom-in-95 duration-700">
            <div className="w-32 h-32 bg-slate-100 rounded-full flex items-center justify-center mb-10 border-4 border-white shadow-xl">
               <span className="text-6xl animate-pulse">🏗️</span>
