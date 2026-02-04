@@ -2,7 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { 
   Database, Server, Globe, Shield, Layout, Settings, 
-  AlertCircle, ChevronRight, Bell, Zap, Cloud, Cpu, RefreshCw, AlertTriangle
+  AlertCircle, ChevronRight, Bell, Zap, Cloud, Cpu, RefreshCw, AlertTriangle, Terminal
 } from 'lucide-react';
 import { AppType } from '../types';
 
@@ -11,7 +11,13 @@ interface PortalProps {
 }
 
 const ICON_MAP: Record<string, any> = {
-  Database, Server, Globe, Shield, Layout, Settings
+  Database, 
+  Server, 
+  Globe, 
+  Shield, 
+  Layout, 
+  Settings,
+  Terminal // 对应日志中心
 };
 
 const Portal: React.FC<PortalProps> = ({ onSelectApp }) => {
@@ -27,12 +33,12 @@ const Portal: React.FC<PortalProps> = ({ onSelectApp }) => {
         const data = await res.json();
         if (data.success) {
           setApps(data.apps);
-          setAnnouncements(data.announcements);
+          setAnnouncements(data.announcements || []);
         } else {
           setError(data.error);
         }
       } catch (err) {
-        setError('无法连接到中枢服务器');
+        setError('无法连接到中枢服务器 (DATABASE_OFFLINE)');
       } finally {
         setLoading(false);
       }
@@ -56,7 +62,8 @@ const Portal: React.FC<PortalProps> = ({ onSelectApp }) => {
           <AlertTriangle className="w-10 h-10 text-red-500" />
         </div>
         <h2 className="text-2xl font-black text-slate-800 mb-2">连接元数据库失败</h2>
-        <p className="text-slate-500 mb-8 font-medium">{error}</p>
+        <p className="text-slate-500 mb-8 font-medium">错误详情: {error}</p>
+        <p className="text-[10px] text-slate-400 mb-6 uppercase tracking-widest">请确认 MySQL 是否在 192.168.21.60 运行</p>
         <button onClick={() => window.location.reload()} className="w-full py-4 bg-slate-900 text-white rounded-2xl font-black">重试连接</button>
       </div>
     );
@@ -64,7 +71,6 @@ const Portal: React.FC<PortalProps> = ({ onSelectApp }) => {
 
   return (
     <div className="max-w-7xl mx-auto p-12 animate-in fade-in duration-700">
-      {/* Hero Welcome */}
       <div className="mb-16 bg-white p-12 rounded-[48px] border border-slate-100 shadow-sm flex items-center justify-between relative overflow-hidden group">
          <div className="absolute top-0 left-0 w-2 h-full bg-blue-600"></div>
          <div className="relative z-10">
@@ -86,35 +92,6 @@ const Portal: React.FC<PortalProps> = ({ onSelectApp }) => {
          </div>
       </div>
 
-      {/* Announcements */}
-      <section className="mb-20">
-        <div className="flex items-center justify-between mb-10 px-4">
-          <h2 className="text-3xl font-black text-slate-800 flex items-center uppercase tracking-tighter">
-            <Zap className="w-8 h-8 mr-4 text-amber-500 fill-amber-500" />
-            系统动态
-          </h2>
-          <button className="text-xs font-black text-blue-600 hover:text-blue-700 uppercase tracking-widest bg-blue-50 px-4 py-2 rounded-full transition-colors">查看全部历史</button>
-        </div>
-        <div className="grid gap-8 md:grid-cols-2">
-          {announcements.map((ann) => (
-            <div key={ann.id} className="group bg-white p-8 rounded-[40px] border border-slate-100 shadow-sm flex items-start space-x-6 hover:border-blue-300 hover:shadow-2xl transition-all duration-500">
-              <div className={`p-5 rounded-3xl shrink-0 ${ann.priority === 'high' ? 'bg-red-50 text-red-500' : 'bg-blue-50 text-blue-500'} group-hover:scale-110 transition-transform`}>
-                <Bell className="w-7 h-7" />
-              </div>
-              <div className="flex-1">
-                <div className="flex justify-between items-center mb-3">
-                  <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-3 py-1 bg-slate-50 rounded-lg">{ann.app_context}</span>
-                  <span className="text-xs font-bold text-slate-400">{new Date(ann.publish_date).toLocaleDateString()}</span>
-                </div>
-                <h3 className="text-xl font-black text-slate-800 mb-3 group-hover:text-blue-600 transition-colors">{ann.title}</h3>
-                <p className="text-slate-500 text-sm leading-relaxed font-medium">{ann.content}</p>
-              </div>
-            </div>
-          ))}
-        </div>
-      </section>
-
-      {/* App Grid */}
       <section>
         <h2 className="text-3xl font-black text-slate-800 mb-12 px-4 uppercase tracking-tighter flex items-center">
            <Layout className="w-8 h-8 mr-4 text-blue-600" />
@@ -139,7 +116,7 @@ const Portal: React.FC<PortalProps> = ({ onSelectApp }) => {
                 </p>
                 
                 <div className="flex items-center text-blue-600 text-xs font-black uppercase tracking-widest opacity-0 group-hover:opacity-100 transition-all transform translate-x-4 group-hover:translate-x-0">
-                  连接应用 <ChevronRight className="w-4 h-4 ml-1" />
+                  进入系统 <ChevronRight className="w-4 h-4 ml-1" />
                 </div>
               </div>
             );
@@ -147,7 +124,6 @@ const Portal: React.FC<PortalProps> = ({ onSelectApp }) => {
         </div>
       </section>
 
-      {/* Footer Metrics */}
       <footer className="mt-32 pt-16 border-t border-slate-100 grid grid-cols-1 md:grid-cols-3 gap-12">
         {[
           { icon: <Cpu className="w-6 h-6" />, label: '集群计算核心', val: '512 vCPU' },
