@@ -83,7 +83,8 @@ const Portal: React.FC<PortalProps> = ({ onSelectApp, announcements }) => {
               </div>
               
               <div className={`w-16 h-16 ${app.color} rounded-[24px] flex items-center justify-center mb-10 group-hover:scale-110 transition-transform duration-500`}>
-                {React.cloneElement(app.icon as React.ReactElement, { className: 'w-8 h-8' })}
+                {/* Fixed: Added <any> to ReactElement cast to avoid "className does not exist" TS error */}
+                {React.cloneElement(app.icon as React.ReactElement<any>, { className: 'w-8 h-8' })}
               </div>
               
               <h3 className="text-xl font-black text-slate-800 mb-3 group-hover:text-blue-600 transition-colors">{app.name}</h3>
