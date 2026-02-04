@@ -1,6 +1,6 @@
 
 import React, { useState } from 'react';
-import { X, Database, Globe, Lock, User, Hash } from 'lucide-react';
+import { X, Database, Globe, Lock, User, Hash, AlertCircle } from 'lucide-react';
 import { DataSource, DatabaseType } from '../../types';
 
 interface Props {
@@ -21,11 +21,29 @@ const DataSourceModal: React.FC<Props> = ({ source, onClose, onSave }) => {
   });
 
   const [testState, setTestState] = useState<'idle' | 'testing' | 'success' | 'error'>('idle');
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   const handleTest = async () => {
     setTestState('testing');
-    await new Promise(r => setTimeout(r, 1200));
-    setTestState(Math.random() > 0.1 ? 'success' : 'error');
+    setErrorMsg(null);
+    try {
+      const res = await fetch('/api/sources/test', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(formData)
+      });
+      const data = await res.json();
+      
+      if (res.ok && data.success) {
+        setTestState('success');
+      } else {
+        setTestState('error');
+        setErrorMsg(data.error || '无法连接到该数据库');
+      }
+    } catch (err: any) {
+      setTestState('error');
+      setErrorMsg('网络请求异常，请检查平台后端状态');
+    }
   };
 
   return (
@@ -39,6 +57,13 @@ const DataSourceModal: React.FC<Props> = ({ source, onClose, onSave }) => {
         </div>
 
         <div className="p-6 space-y-4">
+          {errorMsg && (
+            <div className="p-3 bg-red-50 border border-red-100 rounded-xl flex items-start space-x-2 text-red-600 text-sm animate-in slide-in-from-top-2">
+              <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />
+              <span>{errorMsg}</span>
+            </div>
+          )}
+
           <div className="grid grid-cols-1 gap-4">
             <div>
               <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest mb-1">实例名称</label>
@@ -90,7 +115,7 @@ const DataSourceModal: React.FC<Props> = ({ source, onClose, onSave }) => {
 
             <div className="grid grid-cols-2 gap-4">
                <div>
-                  <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest mb-1">数据库/服务名</label>
+                  <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest mb-1">数据库名</label>
                   <input 
                     type="text" 
                     className="w-full px-4 py-2 border border-slate-200 rounded-xl bg-slate-50 focus:ring-2 ring-blue-500 outline-none"
@@ -106,7 +131,7 @@ const DataSourceModal: React.FC<Props> = ({ source, onClose, onSave }) => {
                     <input 
                       type="text" 
                       className="w-full pl-10 pr-4 py-2 border border-slate-200 rounded-xl bg-slate-50 focus:ring-2 ring-blue-500 outline-none"
-                      placeholder="admin"
+                      placeholder="root"
                       value={formData.username}
                       onChange={(e) => setFormData({...formData, username: e.target.value})}
                     />
@@ -136,14 +161,14 @@ const DataSourceModal: React.FC<Props> = ({ source, onClose, onSave }) => {
             disabled={testState === 'testing'}
             className={`px-4 py-2 rounded-xl text-sm font-semibold transition-all flex items-center ${
               testState === 'testing' ? 'bg-slate-200 text-slate-500' : 
-              testState === 'success' ? 'bg-emerald-100 text-emerald-700' :
-              testState === 'error' ? 'bg-red-100 text-red-700' :
+              testState === 'success' ? 'bg-emerald-600 text-white' :
+              testState === 'error' ? 'bg-red-600 text-white' :
               'bg-white border border-slate-200 text-slate-600 hover:bg-slate-100'
             }`}
           >
             {testState === 'testing' ? '正在连接...' : 
-             testState === 'success' ? '连接成功!' : 
-             testState === 'error' ? '连接失败' : '测试连接'}
+             testState === 'success' ? '测试成功 ✓' : 
+             testState === 'error' ? '测试失败 ✗' : '测试连接'}
           </button>
           <div className="space-x-3">
             <button onClick={onClose} className="px-4 py-2 text-slate-500 hover:text-slate-700 font-medium">取消</button>
