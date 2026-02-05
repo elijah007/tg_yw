@@ -9,14 +9,13 @@ import fs from 'fs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
-const PORT = process.env.PORT || 80;
+// 改为 3000 端口，避免权限问题
+const PORT = process.env.PORT || 3000;
 
-// 1. 绝对路径定义日志文件
 const LOG_FILE_PATH = path.resolve(__dirname, 'tiangong_system.log');
 
 app.use(cors());
 app.use(bodyParser.json());
-// 生产环境下提供编译后的静态文件
 app.use(express.static(path.join(__dirname, 'dist')));
 
 const dbBaseConfig = {
@@ -24,8 +23,7 @@ const dbBaseConfig = {
   user: process.env.DB_USER || 'root',
   password: process.env.DB_PASSWORD || '249gaqLY4pdeHH71T8',
   port: parseInt(process.env.DB_PORT || '3306'),
-  database: process.env.DB_NAME || 'tiangong',
-  connectTimeout: 3000 // 缩短超时时间，方便本地快速测试
+  connectTimeout: 3000
 };
 
 const DB_NAME = process.env.DB_NAME || 'tiangong_db';
@@ -34,17 +32,9 @@ let pool = null;
 async function logMessage(level, module, message) {
   const timestamp = new Date().toLocaleString();
   const logEntry = `[${timestamp}] [${level}] [${module}] ${message}`;
-
-  // 终端颜色输出
   const colors = { INFO: '\x1b[32m', WARN: '\x1b[33m', ERROR: '\x1b[31m', RESET: '\x1b[0m' };
   console.log(`${colors[level] || ''}${logEntry}${colors.RESET}`);
-
-  // 物理文件同步写入 (实时性最高)
-  try {
-    fs.appendFileSync(LOG_FILE_PATH, logEntry + '\n');
-  } catch (e) {}
-
-  // 数据库异步写入
+  try { fs.appendFileSync(LOG_FILE_PATH, logEntry + '\n'); } catch (e) {}
   if (pool) {
     try { await pool.query('INSERT INTO system_logs (level, module, message) VALUES (?, ?, ?)', [level, module, message]); } catch (e) {}
   }
@@ -56,9 +46,8 @@ async function initDB() {
     const tempConn = await mysql.createConnection(dbBaseConfig);
     await tempConn.query(`CREATE DATABASE IF NOT EXISTS ${DB_NAME} CHARACTER SET utf8mb4`);
     await tempConn.end();
-
     pool = mysql.createPool({ ...dbBaseConfig, database: DB_NAME, waitForConnections: true, connectionLimit: 5 });
-
+    
     await pool.query(`CREATE TABLE IF NOT EXISTS system_logs (id INT AUTO_INCREMENT PRIMARY KEY, level VARCHAR(20), module VARCHAR(50), message TEXT, timestamp DATETIME DEFAULT CURRENT_TIMESTAMP)`);
     await pool.query(`CREATE TABLE IF NOT EXISTS sub_apps (id VARCHAR(50) PRIMARY KEY, name VARCHAR(100), description TEXT, icon_type VARCHAR(50), color_theme VARCHAR(50), sort_order INT DEFAULT 0)`);
     await pool.query(`CREATE TABLE IF NOT EXISTS users (id INT AUTO_INCREMENT PRIMARY KEY, username VARCHAR(50) UNIQUE, password VARCHAR(100), real_name VARCHAR(100))`);
@@ -72,31 +61,34 @@ async function initDB() {
         ('LOG_CENTER', '日志中心', '应用运行日志与审计看板', 'Terminal', 'slate', 3),
         ('SECURITY_AUDIT', '安全合规', '漏洞扫描与基线检查', 'Shield', 'amber', 4)`);
       await pool.query("INSERT INTO users (username, password, real_name) VALUES ('Admin', 'admin123', '系统管理员')");
-      await logMessage('INFO', 'INIT', '平台初始化预置数据成功');
+      await logMessage('INFO', 'INIT', '平台预置数据已就绪');
     }
     await logMessage('INFO', 'SYSTEM', '数据库连接与表结构校验通过');
   } catch (err) {
-    await logMessage('ERROR', 'DATABASE', `连接失败: ${err.message}. 平台将运行在离线模式。`);
+    await logMessage('ERROR', 'DATABASE', `连接失败: ${err.message}. 平台运行在演示模式。`);
   }
 }
 
 const checkDb = (req, res, next) => { if (!pool) return res.status(503).json({ success: false, error: 'DATABASE_OFFLINE' }); next(); };
 
 app.get('/api/portal/data', checkDb, async (req, res) => {
-  const [apps] = await pool.query('SELECT * FROM sub_apps ORDER BY sort_order');
-  res.json({ success: true, apps });
+  try {
+    const [apps] = await pool.query('SELECT * FROM sub_apps ORDER BY sort_order');
+    res.json({ success: true, apps });
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 app.post('/api/login', checkDb, async (req, res) => {
   const { username, password } = req.body;
-  const [users] = await pool.query('SELECT * FROM users WHERE username = ? AND password = ?', [username, password]);
-  if (users.length > 0) {
-    await logMessage('INFO', 'AUTH', `用户 ${username} 登录成功`);
-    res.json({ success: true, user: users[0] });
-  } else {
-    await logMessage('WARN', 'AUTH', `登录失败尝试: ${username}`);
-    res.status(401).json({ success: false, error: '认证无效' });
-  }
+  try {
+    const [users] = await pool.query('SELECT * FROM users WHERE username = ? AND password = ?', [username, password]);
+    if (users.length > 0) {
+      await logMessage('INFO', 'AUTH', `用户 ${username} 登录成功`);
+      res.json({ success: true, user: users[0] });
+    } else {
+      res.status(401).json({ success: false, error: '认证无效' });
+    }
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 app.get('/api/logs', checkDb, async (req, res) => {
@@ -109,16 +101,20 @@ app.get('/api/servers', checkDb, async (req, res) => {
   res.json({ success: true, data: rows });
 });
 
-// 开发模式下如果不使用 vite proxy，直接访问根路径会尝试发送 index.html
 app.get('*', (req, res) => {
   const indexPath = path.join(__dirname, 'dist', 'index.html');
   if (fs.existsSync(indexPath)) res.sendFile(indexPath);
-  else res.status(404).send('Backend is running, but Frontend is not built (dist/ folder missing). Use npm run dev for UI.');
+  else res.status(404).send('Backend API is active. Frontend dist folder not found.');
 });
 
 app.listen(PORT, async () => {
-  // 启动即清空或创建日志文件
   fs.writeFileSync(LOG_FILE_PATH, `>>> TIANGONG BOOT: ${new Date().toISOString()} <<<\n`);
-  console.log(`\n\x1b[44m TIANGONG BACKEND \x1b[0m 正在运行在端口 ${PORT}\n`);
+  console.log(`\n\x1b[42m SUCCESS \x1b[0m 天工后端服务正在运行: http://localhost:${PORT}\n`);
   await initDB();
+}).on('error', (err) => {
+  if (err.code === 'EADDRINUSE') {
+    console.error(`\x1b[31m ERROR: 端口 ${PORT} 已被占用，请先关闭相关程序或在 server.js 中修改 PORT。\x1b[0m`);
+  } else {
+    console.error(err);
+  }
 });
