@@ -9,7 +9,6 @@ import fs from 'fs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
-// 改为 3000 端口，避免权限问题
 const PORT = process.env.PORT || 3000;
 
 const LOG_FILE_PATH = path.resolve(__dirname, 'tiangong_system.log');
@@ -109,12 +108,11 @@ app.get('*', (req, res) => {
 
 app.listen(PORT, async () => {
   fs.writeFileSync(LOG_FILE_PATH, `>>> TIANGONG BOOT: ${new Date().toISOString()} <<<\n`);
-  console.log(`\n\x1b[42m SUCCESS \x1b[0m 天工后端服务正在运行: http://localhost:${PORT}\n`);
+  console.log(`\n\x1b[42m SUCCESS \x1b[0m 后端 API 服务: http://localhost:${PORT}`);
+  console.log(`\x1b[44m INFO \x1b[0m 调试日志文件已创建: ${LOG_FILE_PATH}\n`);
   await initDB();
 }).on('error', (err) => {
   if (err.code === 'EADDRINUSE') {
-    console.error(`\x1b[31m ERROR: 端口 ${PORT} 已被占用，请先关闭相关程序或在 server.js 中修改 PORT。\x1b[0m`);
-  } else {
-    console.error(err);
+    console.error(`\x1b[31m ERROR \x1b[0m 端口 ${PORT} 已被占用！请确认是否已经运行了另一个 Node 进程，或关闭占用 3000 端口的程序。\n`);
   }
 });
